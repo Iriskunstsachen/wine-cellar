@@ -70,6 +70,9 @@ html,body{margin:0;height:100%;background:#050505;color:#fff;overflow:hidden;ove
 .gate-note{margin-top:16px;color:rgba(255,255,255,.4)}
 @media (hover:none),(pointer:coarse){
   .help.keys{display:none}.help.touch{display:block}
+  /* phones / tablets: the arrows at the bottom, where the thumbs are */
+  .touch-controls{position:fixed;left:50%;bottom:max(26px,calc(env(safe-area-inset-bottom) + 14px));transform:translateX(-50%);margin:0;z-index:12}
+  .touch-pad{grid-template-columns:58px 58px 58px;grid-template-rows:58px 58px;gap:8px}
   .beam{width:min(74vw,540px);height:min(74vw,540px)}
   .scan-info{display:none}
   .title{bottom:auto;top:22px}
