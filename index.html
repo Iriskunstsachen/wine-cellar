@@ -2701,11 +2701,12 @@ D1pp6049aaetAxh60UHrRQWFFFFACg4pyt6UynLQNEqHFShge2KiXpUkfWgosxx71zSSQ+1SW8uzjHFT
       float outer = 1.0 - smoothstep(uBeamRadius * 0.12, uBeamRadius * 1.12, d);
       float mid = 1.0 - smoothstep(uBeamRadius * 0.00, uBeamRadius * 0.60, d);
       float hot = 1.0 - smoothstep(0.0, uBeamRadius * 0.18, d);
-      float beam = (outer * 0.34 + mid * 0.50 + hot * 0.12) * 0.58 * uPower * (1.0 + 0.9 * uBoost);
+      float beam = (outer * 0.34 + mid * 0.50 + hot * 0.12) * 0.58 * uPower * (1.0 + 1.8 * uBoost);
       vec3 L = normalize(vec3(0.18, 0.94, 0.10));
       float diff = max(dot(n, L), 0.0);
       float ambient = 0.022 + 0.02 * diff;
-      float illum = ambient * uAmbient + beam * (0.78 + diff * 0.28);
+      // high beam also spills a little light into the surroundings
+      float illum = ambient * uAmbient * (1.0 + 2.2 * uBoost * uPower) + beam * (0.78 + diff * 0.28);
       // a weak battery gives a dimmer, warmer, more orange light
       vec3 tint = mix(vec3(1.25, 0.88, 0.6), vec3(1.10, 1.04, 0.95), clamp(uPower * 1.2 - 0.1, 0.0, 1.0));
       vec3 warm = mix(tex, tex * tint, min(1.0, beam * 4.0) * 0.55);
@@ -2900,7 +2901,7 @@ D1pp6049aaetAxh60UHrRQWFFFFACg4pyt6UynLQNEqHFShge2KiXpUkfWgosxx71zSSQ+1SW8uzjHFT
   // high beam: a wider, brighter cone (and the battery runs down faster)
   let boostMix = 0;
   function applyBeamSize() {
-    const k = 1 + 0.22 * boostMix;
+    const k = 1 + 0.45 * boostMix;
     shared.uBeamRadius.value = beamRadiusPx * dpr * k;
     beamEl.style.width = beamEl.style.height = Math.round(beamRadiusPx * 1.9 * k) + 'px';
   }
