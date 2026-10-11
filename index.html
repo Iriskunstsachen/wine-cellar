@@ -79,6 +79,8 @@ html,body{margin:0;height:100%;background:#050505;color:#fff;overflow:hidden;ove
   .scan-info{display:none}
   .title{bottom:calc(176px + env(safe-area-inset-bottom));top:auto}
 }
+/* narrow windows: no room for the scan readout next to the room name */
+@media (max-width:700px){ .scan-info{display:none} }
 @media (hover:hover) and (pointer:fine){
   #stage,#stage *{cursor:none}
   #stage button,#stage button *{cursor:pointer}
@@ -2701,7 +2703,7 @@ D1pp6049aaetAxh60UHrRQWFFFFACg4pyt6UynLQNEqHFShge2KiXpUkfWgosxx71zSSQ+1SW8uzjHFT
       float outer = 1.0 - smoothstep(uBeamRadius * 0.12, uBeamRadius * 1.12, d);
       float mid = 1.0 - smoothstep(uBeamRadius * 0.00, uBeamRadius * 0.60, d);
       float hot = 1.0 - smoothstep(0.0, uBeamRadius * 0.18, d);
-      float beam = (outer * 0.34 + mid * 0.50 + hot * 0.12) * 0.58 * uPower * (1.0 + 2.4 * uBoost);
+      float beam = (outer * 0.34 + mid * 0.50 + hot * 0.12) * 0.68 * uPower * (1.0 + 2.0 * uBoost);
       vec3 L = normalize(vec3(0.18, 0.94, 0.10));
       float diff = max(dot(n, L), 0.0);
       float ambient = 0.022 + 0.02 * diff;
@@ -3244,8 +3246,8 @@ D1pp6049aaetAxh60UHrRQWFFFFACg4pyt6UynLQNEqHFShge2KiXpUkfWgosxx71zSSQ+1SW8uzjHFT
     // Only the high beam strains the battery: it then weakens over ~1–1.5 min
     // and flickers; on the normal beam the lamp burns steadily and the
     // battery slowly recovers (as real batteries do when the load drops).
-    health: 1, drain: rnd(1 / 85, 1 / 60),
-    nextEvent: rnd(6, 18),                     // the first little stutter comes soon after switching to high
+    health: 1, drain: rnd(1 / 50, 1 / 35),
+    nextEvent: rnd(1.5, 4),                     // the first little stutter comes soon after switching to high
     script: [], seg: null, segT: 0, target: 1, level: 1, tau: 0.05, time: 0,
     ph: [rnd(0, 6), rnd(0, 6), rnd(0, 6)],
   };
@@ -3291,14 +3293,14 @@ D1pp6049aaetAxh60UHrRQWFFFFACg4pyt6UynLQNEqHFShge2KiXpUkfWgosxx71zSSQ+1SW8uzjHFT
       lamp.target = 1; lamp.tau = 0.12;
       lamp.level += (1 - lamp.level) * (1 - Math.exp(-dt / lamp.tau));
       lamp.health = Math.min(1, lamp.health + dt / 70);
-      lamp.nextEvent = Math.max(lamp.nextEvent, rnd(6, 18) * (0.3 + lamp.health * 0.7));
+      lamp.nextEvent = Math.max(lamp.nextEvent, rnd(1.5, 4) * (0.3 + lamp.health * 0.7));
       return lamp.level;
     }
     lamp.health = Math.max(0, lamp.health - lamp.drain * dt);
     // next event: rare while the battery is fresh, more often as it empties
     if (!lamp.seg && !lamp.script.length && (lamp.nextEvent -= dt) <= 0) {
       scheduleEvent();
-      lamp.nextEvent = rnd(6, 30) * (0.15 + lamp.health * 0.85);
+      lamp.nextEvent = rnd(3, 14) * (0.15 + lamp.health * 0.85);
     }
     let left = dt;
     while (left > 0) {
@@ -3315,7 +3317,7 @@ D1pp6049aaetAxh60UHrRQWFFFFACg4pyt6UynLQNEqHFShge2KiXpUkfWgosxx71zSSQ+1SW8uzjHFT
       if (lamp.segT >= lamp.seg.d - 1e-6) {
         // back on after going out: as if shaken, the battery has a bit left again
         if (lamp.seg.out) {
-          lamp.health = rnd(0.45, 0.95); lamp.drain = rnd(1 / 85, 1 / 55);
+          lamp.health = rnd(0.45, 0.95); lamp.drain = rnd(1 / 50, 1 / 35);
           if (window.RoomSound && RoomSound.shake) RoomSound.shake();
         }
         lamp.seg = null;
