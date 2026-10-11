@@ -43,7 +43,8 @@ html,body{margin:0;height:100%;background:#050505;color:#fff;overflow:hidden;ove
 .sound[aria-pressed="true"] svg,.sound[aria-pressed="true"] .st{color:var(--accent)}
 .sound[aria-pressed="true"] .wv{display:inline}
 .sound[aria-pressed="true"] .mu{display:none}
-.st{min-width:2.2em;text-align:left}
+.st{min-width:2.4em;text-align:left}
+.hud .sound{min-width:122px}
 .touch-controls{display:block;margin-top:10px}
 .touch-pad{display:grid;grid-template-columns:52px 52px 52px;grid-template-rows:52px 52px;gap:7px}
 .touch-btn{border:none;border-radius:12px;background:rgba(255,255,255,.1);color:#fff;font:600 18px/1 Arial,sans-serif;
@@ -95,13 +96,17 @@ html,body{margin:0;height:100%;background:#050505;color:#fff;overflow:hidden;ove
   <div class="vignette"></div>
 
   <div class="hud">
-    <div class="help keys mono"><b>DRAG</b> look around + move flashlight<br><b>W / S</b> move forward / back<br><b>A / D</b> sidestep<br><b>ARROWS / SCROLL</b> move</div>
+    <div class="help keys mono"><b>DRAG</b> look around + move flashlight<br><b>W / S</b> move forward / back<br><b>A / D</b> sidestep<br><b>ARROWS / SCROLL</b> move<br><b>L</b> high beam</div>
     <div class="help touch mono"><b>DRAG</b> look around + move light<br><b>HOLD BUTTONS</b> to move</div>
     <button class="sound mono" id="soundBtn" type="button" aria-pressed="false" aria-label="Sound">
       <svg viewBox="0 0 24 24" aria-hidden="true"><path class="sp" d="M4 9.5h3.2L12 5.5v13l-4.8-4H4z"/>
         <g class="wv"><path d="M15.2 9.2a4 4 0 0 1 0 5.6"/><path d="M17.8 6.8a7.4 7.4 0 0 1 0 10.4"/></g>
         <g class="mu"><path d="M15.5 9.5l5 5"/><path d="M20.5 9.5l-5 5"/></g></svg>
       <span>Sound</span><span class="st">Off</span>
+    </button>
+    <button class="sound mono" id="beamBtn" type="button" aria-pressed="false" aria-label="High beam">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path class="sp" d="M3 9h6l3-2.5v11L9 15H3z"/><g class="wv"><path d="M15 8.5l5-2"/><path d="M15 12h6"/><path d="M15 15.5l5 2"/></g><g class="mu"><path d="M15 12h3"/></g></svg>
+      <span>Beam</span><span class="st">Low</span>
     </button>
     <div class="touch-controls"><div class="touch-pad">
     <div></div><button class="touch-btn" data-move="forward" aria-label="Forward">↑</button><div></div>
@@ -2689,13 +2694,14 @@ D1pp6049aaetAxh60UHrRQWFFFFACg4pyt6UynLQNEqHFShge2KiXpUkfWgosxx71zSSQ+1SW8uzjHFT
     uniform vec2 uLightPos;
     uniform float uAmbient;
     uniform float uPower; // battery: 1 = full, 0 = out (flicker)
+    uniform float uBoost; // high beam: 0 = normal, 1 = high
     vec3 shade(vec3 tex, vec3 n){
       tex = tex * 0.86 + vec3(0.08);
       float d = distance(gl_FragCoord.xy, uLightPos);
       float outer = 1.0 - smoothstep(uBeamRadius * 0.12, uBeamRadius * 1.12, d);
       float mid = 1.0 - smoothstep(uBeamRadius * 0.00, uBeamRadius * 0.60, d);
       float hot = 1.0 - smoothstep(0.0, uBeamRadius * 0.18, d);
-      float beam = (outer * 0.34 + mid * 0.50 + hot * 0.12) * 0.58 * uPower;
+      float beam = (outer * 0.34 + mid * 0.50 + hot * 0.12) * 0.58 * uPower * (1.0 + 0.9 * uBoost);
       vec3 L = normalize(vec3(0.18, 0.94, 0.10));
       float diff = max(dot(n, L), 0.0);
       float ambient = 0.022 + 0.02 * diff;
@@ -2782,6 +2788,7 @@ D1pp6049aaetAxh60UHrRQWFFFFACg4pyt6UynLQNEqHFShge2KiXpUkfWgosxx71zSSQ+1SW8uzjHFT
     uScale: { value: 500 },
     uRes: { value: new THREE.Vector2(1, 1) },
     uPower: { value: 1 },
+    uBoost: { value: 0 },
   };
 
   function flashlightMaterial(src) {
@@ -2810,7 +2817,7 @@ D1pp6049aaetAxh60UHrRQWFFFFACg4pyt6UynLQNEqHFShge2KiXpUkfWgosxx71zSSQ+1SW8uzjHFT
         uAmbient: { value: 1 },
         uPush: { value: RENDER === 'mix' ? -0.01 : 0 },
         uBeamRadius: shared.uBeamRadius, uLightPos: shared.uLightPos,
-        uPower: shared.uPower,
+        uPower: shared.uPower, uBoost: shared.uBoost,
       },
     });
   }
@@ -2823,7 +2830,7 @@ D1pp6049aaetAxh60UHrRQWFFFFACg4pyt6UynLQNEqHFShge2KiXpUkfWgosxx71zSSQ+1SW8uzjHFT
         uSize: { value: size }, uScale: shared.uScale, uRes: shared.uRes,
         uAmbient: { value: 0.3 },
         uBeamRadius: shared.uBeamRadius, uLightPos: shared.uLightPos,
-        uPower: shared.uPower,
+        uPower: shared.uPower, uBoost: shared.uBoost,
       },
     });
   }
@@ -2890,6 +2897,13 @@ D1pp6049aaetAxh60UHrRQWFFFFACg4pyt6UynLQNEqHFShge2KiXpUkfWgosxx71zSSQ+1SW8uzjHFT
     reticle.style.top = pointer.y + 'px';
     shared.uLightPos.value.set(pointer.x * dpr, (canvas.clientHeight - pointer.y) * dpr);
   }
+  // high beam: a wider, brighter cone (and the battery runs down faster)
+  let boostMix = 0;
+  function applyBeamSize() {
+    const k = 1 + 0.22 * boostMix;
+    shared.uBeamRadius.value = beamRadiusPx * dpr * k;
+    beamEl.style.width = beamEl.style.height = Math.round(beamRadiusPx * 1.9 * k) + 'px';
+  }
   function resize() {
     dpr = Math.min(window.devicePixelRatio || 1, 2);
     const r = canvas.getBoundingClientRect();
@@ -2901,8 +2915,7 @@ D1pp6049aaetAxh60UHrRQWFFFFACg4pyt6UynLQNEqHFShge2KiXpUkfWgosxx71zSSQ+1SW8uzjHFT
     shared.uScale.value = (r.height * dpr) / (2 * Math.tan(THREE.MathUtils.degToRad(camera.fov) / 2));
     shared.uRes.value.set(r.width * dpr, r.height * dpr);
     beamRadiusPx = Math.min(r.width, r.height) * (r.width > 900 ? (MOBILE ? 0.34 : 0.40) : 0.44);
-    shared.uBeamRadius.value = beamRadiusPx * dpr;
-    beamEl.style.width = beamEl.style.height = Math.round(beamRadiusPx * 1.9) + 'px';
+    applyBeamSize();
     if (!pointer.active) { pointer.x = r.width * 0.58; pointer.y = r.height * 0.42; }
     else { pointer.x = clamp(pointer.x, 0, r.width); pointer.y = clamp(pointer.y, 0, r.height); }
     placeLightUI();
@@ -2936,7 +2949,7 @@ D1pp6049aaetAxh60UHrRQWFFFFACg4pyt6UynLQNEqHFShge2KiXpUkfWgosxx71zSSQ+1SW8uzjHFT
     const dy = e.clientY - state.lastY;
     state.lastX = e.clientX;
     state.lastY = e.clientY;
-    cam.yaw -= dx * 0.0055;
+    cam.yaw += dx * 0.0055; // swipe right = look right (like up / down)
     cam.pitch = clamp(cam.pitch - dy * 0.0038, cam.pitchMin, cam.pitchMax);
   });
   function endDrag(e) { if (e.pointerId === state.dragId) { state.dragging = false; state.dragId = null; } }
@@ -3269,7 +3282,7 @@ D1pp6049aaetAxh60UHrRQWFFFFACg4pyt6UynLQNEqHFShge2KiXpUkfWgosxx71zSSQ+1SW8uzjHFT
   function battery(dt) {
     if (!entered) return 1;
     lamp.time += dt;
-    lamp.health = Math.max(0, lamp.health - lamp.drain * dt);
+    lamp.health = Math.max(0, lamp.health - lamp.drain * dt * (1 + 1.2 * boostMix));
     // next event: rare while the battery is fresh, more often as it empties
     if (!lamp.seg && !lamp.script.length && (lamp.nextEvent -= dt) <= 0) {
       scheduleEvent();
@@ -3304,6 +3317,18 @@ D1pp6049aaetAxh60UHrRQWFFFFACg4pyt6UynLQNEqHFShge2KiXpUkfWgosxx71zSSQ+1SW8uzjHFT
     return Math.max(0, lamp.level * base * (1 + wobble));
   }
 
+  // ---------- high beam switch (button + key L) ----------
+  const beamBtn = $('#beamBtn');
+  let highBeam = false;
+  function setHighBeam(on) {
+    highBeam = on;
+    beamBtn.setAttribute('aria-pressed', String(on));
+    beamBtn.querySelector('.st').textContent = on ? 'High' : 'Low';
+    if (window.RoomSound && RoomSound.flicker) RoomSound.flicker(0.6); // the switch on the lamp
+  }
+  beamBtn.addEventListener('click', () => setHighBeam(!highBeam));
+  addEventListener('keydown', (e) => { if (e.key.toLowerCase() === 'l' && !e.metaKey && !e.ctrlKey && !e.repeat) setHighBeam(!highBeam); });
+
   // ---------- loop ----------
   let prev = performance.now();
   let bobPhase = 0, bobAmp = 0;
@@ -3336,6 +3361,8 @@ D1pp6049aaetAxh60UHrRQWFFFFACg4pyt6UynLQNEqHFShge2KiXpUkfWgosxx71zSSQ+1SW8uzjHFT
     lastX = cam.x; lastZ = cam.z;
     const power = battery(dt);
     shared.uPower.value = power;
+    const bt = highBeam ? 1 : 0;
+    if (Math.abs(bt - boostMix) > 0.001) { boostMix += (bt - boostMix) * Math.min(1, dt * 7); shared.uBoost.value = boostMix; applyBeamSize(); }
     beamEl.style.opacity = power.toFixed(3);
     // bump: a short jolt back and a slight nod, settling in ~0.4 s
     bumpT = Math.min(1, bumpT + dt / 0.4);
