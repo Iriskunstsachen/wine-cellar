@@ -76,7 +76,7 @@ html,body{margin:0;height:100%;background:#050505;color:#fff;overflow:hidden;ove
   .touch-label{display:block}
   .beam{width:min(74vw,540px);height:min(74vw,540px)}
   .scan-info{display:none}
-  .title{bottom:auto;top:22px}
+  .title{bottom:calc(176px + env(safe-area-inset-bottom));top:auto}
 }
 @media (hover:hover) and (pointer:fine){
   #stage,#stage *{cursor:none}
