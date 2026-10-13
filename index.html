@@ -2383,19 +2383,25 @@ D1pp6049aaetAxh60UHrRQWFFFFACg4pyt6UynLQNEqHFShge2KiXpUkfWgosxx71zSSQ+1SW8uzjHFT
   }
 
   // ---------- footsteps on a gritty stone floor ----------
-  // A dull, hard thud (stone, not wood) and more grit and small stones under the sole.
-  function hit(t, dest, gain, bodyF) {
+  // A shoe on dusty stone, built like a real step: the heel lands (a short, dull
+  // impact of noise, no tone), the sole rolls and scuffs over the grit, the toe
+  // pushes off softly. Every step a little different.
+  function noiseHit(t, dest, gain, type, freq, q, attack, decay, len) {
     const n = ctx.createBufferSource(); n.buffer = whiteBuf;
-    const body = ctx.createBiquadFilter(); body.type = 'bandpass'; body.frequency.value = bodyF; body.Q.value = 1.1;
-    const bg = ctx.createGain(); env(bg, t, gain, 0.002, 0.06);
-    n.connect(body); body.connect(bg); bg.connect(dest);
-    n.start(t, rand(0, 1.5), 0.1);
-    const o = ctx.createOscillator(); o.type = 'sine';
-    o.frequency.setValueAtTime(rand(95, 120), t);
-    o.frequency.exponentialRampToValueAtTime(55, t + 0.06);
-    const og = ctx.createGain(); env(og, t, gain * 0.7, 0.002, 0.06);
-    o.connect(og); og.connect(dest);
-    o.start(t); o.stop(t + 0.1);
+    const f = ctx.createBiquadFilter(); f.type = type; f.frequency.value = freq; f.Q.value = q;
+    const g = ctx.createGain(); env(g, t, gain, attack, decay);
+    n.connect(f); f.connect(g); g.connect(dest);
+    n.start(t, rand(0, 1.5), len);
+  }
+  function stoneStep(t, dest, v) {
+    // heel: the impact (dull, short) and the stone's low body under it
+    noiseHit(t, dest, 0.16 * v, 'lowpass', rand(1500, 2400), 0.7, 0.0015, rand(0.03, 0.05), 0.08);
+    noiseHit(t, dest, 0.12 * v, 'bandpass', rand(170, 260), 1.1, 0.002, rand(0.05, 0.08), 0.12);
+    // the sole rolling and scuffing over the dust
+    const ts = t + rand(0.025, 0.045);
+    noiseHit(ts, dest, rand(0.018, 0.035) * v, 'bandpass', rand(900, 2000), 0.8, rand(0.012, 0.025), rand(0.06, 0.11), 0.16);
+    // toe pushing off
+    noiseHit(t + rand(0.09, 0.14), dest, rand(0.03, 0.05) * v, 'lowpass', rand(2200, 3200), 0.7, 0.002, rand(0.02, 0.035), 0.06);
   }
   function grit(t, dest, amount) {
     const grains = Math.floor(rand(6, 14) * amount);
@@ -2445,9 +2451,8 @@ D1pp6049aaetAxh60UHrRQWFFFFACg4pyt6UynLQNEqHFShge2KiXpUkfWgosxx71zSSQ+1SW8uzjHFT
     // footsteps and glass: completely dry, no echo
     if (p) { bus.connect(p); out(p, 0); } else out(bus, 0);
     const v = rand(0.85, 1.15);
-    hit(t, bus, 0.13 * v, rand(320, 520));
-    hit(t + rand(0.06, 0.09), bus, 0.06 * v, rand(500, 800));
-    grit(t, bus, 1);
+    stoneStep(t, bus, v * (stepSide > 0 ? 1 : rand(0.85, 0.95))); // one foot lands a touch softer
+    grit(t + rand(0.01, 0.04), bus, 0.6);
     // only where broken glass and bottles really lie on the floor (almost every step there)
     if (onGlass && Math.random() < 0.85) glass(t + rand(0.01, 0.05), bus);
     // now and then a small stone rolling away
@@ -2738,6 +2743,7 @@ D1pp6049aaetAxh60UHrRQWFFFFACg4pyt6UynLQNEqHFShge2KiXpUkfWgosxx71zSSQ+1SW8uzjHFT
     uniform float uPower; // battery: 1 = full, 0 = out (flicker)
     uniform float uBoost; // high beam: 0 = normal, 1 = high
     uniform float uAmbK;  // how much of the room shows outside the beam (1 = as in the piece)
+    uniform float uUV;    // UV lamp (video only): 0 = flashlight, 1 = UV
     vec3 shade(vec3 tex, vec3 n){
       tex = tex * 0.86 + vec3(0.08);
       float d = distance(gl_FragCoord.xy, uLightPos);
@@ -2752,7 +2758,13 @@ D1pp6049aaetAxh60UHrRQWFFFFACg4pyt6UynLQNEqHFShge2KiXpUkfWgosxx71zSSQ+1SW8uzjHFT
       // a weak battery gives a dimmer, warmer, more orange light
       vec3 tint = mix(vec3(1.25, 0.88, 0.6), vec3(1.10, 1.04, 0.95), clamp(uPower * 1.2 - 0.1, 0.0, 1.0));
       vec3 warm = mix(tex, tex * tint, min(1.0, beam * 4.0) * 0.55);
-      return warm * illum;
+      vec3 lit = warm * illum;
+      if (uUV < 0.001) return lit;
+      // UV: the room turns dark violet, only light things glow a little
+      float g = pow(dot(tex, vec3(0.3, 0.59, 0.11)), 1.4);
+      vec3 uv = g * vec3(0.34, 0.22, 0.95) * (ambient * uAmbient * uAmbK * 0.6 + beam * 1.25)
+              + max(g - 0.4, 0.0) * beam * vec3(0.55, 0.65, 1.0) * 1.3;
+      return mix(lit, uv, uUV);
     }`;
   const VS = `
     uniform float uPush;
@@ -2779,6 +2791,9 @@ D1pp6049aaetAxh60UHrRQWFFFFACg4pyt6UynLQNEqHFShge2KiXpUkfWgosxx71zSSQ+1SW8uzjHFT
     uniform float uHasMap;
     uniform vec3 uColor;
     uniform float uDissolve;
+    uniform sampler2D uInkTex; // UV ink (video only): letters projected onto the surface
+    uniform mat4 uInkMat;      // world → ink space (x, y in -0.5…0.5 across the letters)
+    uniform float uInkOn;
     ${LIGHT}
     void main(){
       // where the scan ends, the surface frays out (ragged, not a clean cut)
@@ -2792,7 +2807,20 @@ D1pp6049aaetAxh60UHrRQWFFFFACg4pyt6UynLQNEqHFShge2KiXpUkfWgosxx71zSSQ+1SW8uzjHFT
         if (h > solid) discard;
       }
       vec3 tex = uHasMap > 0.5 ? texture2D(uMap, vUv).rgb * uColor : uColor;
-      gl_FragColor = vec4(shade(tex, normalize(vWorldNormal)), 1.0);
+      vec3 col = shade(tex, normalize(vWorldNormal));
+      if (uInkOn > 0.5 && uUV > 0.001) {
+        // the ink has soaked into the floor: it follows every bump, is stronger where
+        // the surface is smooth and pale, and glows only where the UV beam falls
+        vec3 ip = (uInkMat * vec4(vWorld, 1.0)).xyz;
+        if (abs(ip.x) < 0.5 && abs(ip.y) < 0.5 && abs(ip.z) < 0.12) {
+          float a = texture2D(uInkTex, ip.xy + 0.5).a * (1.0 - smoothstep(0.05, 0.12, abs(ip.z)));
+          a *= 0.55 + 0.45 * smoothstep(0.08, 0.45, dot(tex, vec3(0.3, 0.59, 0.11)));
+          float d = distance(gl_FragCoord.xy, uLightPos);
+          float inBeam = 1.0 - smoothstep(uBeamRadius * 0.12, uBeamRadius * 0.95, d);
+          col += vec3(0.62, 1.0, 0.86) * a * inBeam * uPower * uUV * 1.5;
+        }
+      }
+      gl_FragColor = vec4(col, 1.0);
     }`;
   const POINTS_VS = `
     uniform float uSize;
@@ -2833,6 +2861,10 @@ D1pp6049aaetAxh60UHrRQWFFFFACg4pyt6UynLQNEqHFShge2KiXpUkfWgosxx71zSSQ+1SW8uzjHFT
     uPower: { value: 1 },
     uBoost: { value: 0 },
     uAmbK: { value: 1 },
+    uUV: { value: 0 },
+    uInkTex: { value: null },
+    uInkMat: { value: new THREE.Matrix4() },
+    uInkOn: { value: 0 },
   };
 
   function flashlightMaterial(src) {
@@ -2861,7 +2893,8 @@ D1pp6049aaetAxh60UHrRQWFFFFACg4pyt6UynLQNEqHFShge2KiXpUkfWgosxx71zSSQ+1SW8uzjHFT
         uAmbient: { value: 1 },
         uPush: { value: RENDER === 'mix' ? -0.01 : 0 },
         uBeamRadius: shared.uBeamRadius, uLightPos: shared.uLightPos,
-        uPower: shared.uPower, uBoost: shared.uBoost, uAmbK: shared.uAmbK,
+        uPower: shared.uPower, uBoost: shared.uBoost, uAmbK: shared.uAmbK, uUV: shared.uUV,
+        uInkTex: shared.uInkTex, uInkMat: shared.uInkMat, uInkOn: shared.uInkOn,
       },
     });
   }
@@ -2874,7 +2907,7 @@ D1pp6049aaetAxh60UHrRQWFFFFACg4pyt6UynLQNEqHFShge2KiXpUkfWgosxx71zSSQ+1SW8uzjHFT
         uSize: { value: size }, uScale: shared.uScale, uRes: shared.uRes,
         uAmbient: { value: 0.3 },
         uBeamRadius: shared.uBeamRadius, uLightPos: shared.uLightPos,
-        uPower: shared.uPower, uBoost: shared.uBoost, uAmbK: shared.uAmbK,
+        uPower: shared.uPower, uBoost: shared.uBoost, uAmbK: shared.uAmbK, uUV: shared.uUV,
       },
     });
   }
@@ -3489,13 +3522,59 @@ D1pp6049aaetAxh60UHrRQWFFFFACg4pyt6UynLQNEqHFShge2KiXpUkfWgosxx71zSSQ+1SW8uzjHFT
         cam.yaw += (f.dx / this.scale) * 0.0055;
         cam.pitch = clamp(cam.pitch - (f.dy / this.scale) * 0.0038, cam.pitchMin, cam.pitchMax);
       }
+      // a person rather than a thumb: the head's direction set directly, and the body
+      // moved along its own path (with the piece's collision; counts as walking)
+      if (f.yaw != null) cam.yaw = f.yaw;
+      if (f.pitch != null) cam.pitch = clamp(f.pitch, cam.pitchMin, cam.pitchMax);
+      if (f.move) { moveBy(f.move[0], f.move[1]); lastWheel = f.now; }
       pointer.x = clamp(f.px, 0, this.w); pointer.y = clamp(f.py, 0, this.h); pointer.active = true;
       shared.uLightPos.value.set(pointer.x, this.h - pointer.y);
       highBeam = !!f.high; boostMix = highBeam ? 1 : 0; shared.uBoost.value = boostMix;
+      shared.uUV.value = f.uv || 0;
       const r = tick(f.dt, f.now, f.power);
       return { moved: r.moved, x: cam.x, z: cam.z, yaw: cam.yaw, pitch: cam.pitch };
     },
     canvas,
+    // UV ink on the floor: letters projected onto the scanned surface around `center`,
+    // the top of the letters pointing along `up` (away from the reader)
+    ink(text, center, up, width, opts = {}) {
+      const c = document.createElement('canvas'); c.width = 2048; c.height = 512;
+      const g = c.getContext('2d');
+      let seed = 9; const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
+      g.fillStyle = '#fff'; g.textBaseline = 'middle';
+      g.font = `${opts.size || 128}px "Courier New", Courier, monospace`;
+      const sp = opts.spacing || 34;
+      const tw = [...text].reduce((s, ch) => s + g.measureText(ch).width + sp, -sp), k = Math.min(1, 1900 / tw);
+      let cx = (2048 - tw * k) / 2;
+      g.filter = 'blur(2.2px)'; // a pen on rough stone: soft, bled edges
+      for (const ch of text) {
+        g.save(); g.translate(cx, 256 + (rnd() - 0.5) * 10); g.rotate((rnd() - 0.5) * 0.05);
+        g.scale(k, k); g.globalAlpha = 0.5 + rnd() * 0.5;
+        g.fillText(ch, 0, 0); g.restore();
+        cx += (g.measureText(ch).width + sp) * k;
+      }
+      g.filter = 'none';
+      // patchy: the ink took better in some places than in others
+      g.globalCompositeOperation = 'destination-out';
+      for (let i = 0; i < 5200; i++) { g.globalAlpha = rnd() * 0.55; const r = 1 + rnd() * 4; g.beginPath(); g.arc(rnd() * 2048, rnd() * 512, r, 0, 6.3); g.fill(); }
+      const tex = new THREE.CanvasTexture(c); tex.colorSpace = THREE.NoColorSpace;
+      const n = new THREE.Vector3(0, 1, 0);
+      const u = new THREE.Vector3(...up); u.addScaledVector(n, -u.dot(n)).normalize();
+      const r = new THREE.Vector3().crossVectors(u, n);
+      const m = new THREE.Matrix4().makeBasis(r.multiplyScalar(width), u.multiplyScalar(width * 512 / 2048), n);
+      m.setPosition(new THREE.Vector3(...center));
+      shared.uInkTex.value = tex; shared.uInkMat.value.copy(m).invert(); shared.uInkOn.value = 1;
+    },
+    // where a point of the room appears on screen (output px), with the current view
+    project(x, y, z) { const p = new THREE.Vector3(x, y, z).project(camera); return [(p.x + 1) / 2 * this.w, (1 - p.y) / 2 * this.h, p.z]; },
+    // floor height at x, z (first surface below 2.3 m), or null
+    floorAt(x, z) { rayOrigin.set(x, 2.3, z); rayDir.set(0, -1, 0); const d = firstHit(10); return d < Infinity ? 2.3 - d : null; },
+    // the point in the room under a screen position (output px)
+    pick(px, py) {
+      const rc = new THREE.Raycaster(); rc.setFromCamera(new THREE.Vector2(px / this.w * 2 - 1, -(py / this.h) * 2 + 1), camera);
+      const h = rc.intersectObject(model, true)[0];
+      return h ? [h.point.x, h.point.y, h.point.z] : null;
+    },
     ray(x, y, z, yaw, pitch = 0) {
       const dir = new THREE.Vector3(Math.sin(yaw) * Math.cos(pitch), Math.sin(pitch), -Math.cos(yaw) * Math.cos(pitch));
       const h = new THREE.Raycaster(new THREE.Vector3(x, y, z), dir, 0.05, 9).intersectObject(model, true)[0];
@@ -3503,7 +3582,8 @@ D1pp6049aaetAxh60UHrRQWFFFFACg4pyt6UynLQNEqHFShge2KiXpUkfWgosxx71zSSQ+1SW8uzjHFT
       const n = h.face.normal.clone().transformDirection(h.object.matrixWorld);
       return { d: +h.distance.toFixed(2), facing: +Math.abs(n.dot(dir)).toFixed(2), y: +h.point.y.toFixed(2) };
     },
-    // text on a wall, lit only by the flashlight (like everything else)
+    // text on a wall or the floor: lit by the flashlight like everything else, or
+    // (opts.uv) invisible ink that only glows in the UV lamp's beam
     writing(text, x, y, z, yaw, pitch, width, opts = {}) {
       const dir = new THREE.Vector3(Math.sin(yaw) * Math.cos(pitch), Math.sin(pitch), -Math.cos(yaw) * Math.cos(pitch));
       const hit = new THREE.Raycaster(new THREE.Vector3(x, y, z), dir, 0.05, 9).intersectObject(model, true)[0];
@@ -3514,6 +3594,21 @@ D1pp6049aaetAxh60UHrRQWFFFFACg4pyt6UynLQNEqHFShge2KiXpUkfWgosxx71zSSQ+1SW8uzjHFT
       const g = c.getContext('2d');
       let seed = 5; const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
       g.fillStyle = '#fff'; g.textBaseline = 'middle';
+      if (opts.mono) {
+        // sober, spaced typewriter letters, a little uneven, like marked by hand with a pen
+        g.font = `${opts.size || 120}px "Courier New", Courier, monospace`;
+        const sp = opts.spacing || 30;
+        const tw = [...text].reduce((s, ch) => s + g.measureText(ch).width + sp, -sp), k = Math.min(1, 1960 / tw);
+        let cx = (2048 - tw * k) / 2;
+        g.shadowColor = 'rgba(255,255,255,0.9)'; g.shadowBlur = 14;
+        for (const ch of text) {
+          g.save(); g.translate(cx, 192 + (rnd() - 0.5) * 8); g.rotate((rnd() - 0.5) * 0.04);
+          g.scale(k, k); g.globalAlpha = 0.55 + rnd() * 0.45;
+          g.fillText(ch, 0, 0); g.restore();
+          cx += (g.measureText(ch).width + sp) * k;
+        }
+        g.shadowBlur = 0;
+      } else {
       g.font = `${opts.size || 230}px ${opts.font || '"Bradley Hand", "Segoe Print", "Chalkboard", cursive'}`;
       const tw = g.measureText(text).width, k = Math.min(1, 1960 / tw);
       let cx = (2048 - tw * k) / 2;
@@ -3523,21 +3618,35 @@ D1pp6049aaetAxh60UHrRQWFFFFACg4pyt6UynLQNEqHFShge2KiXpUkfWgosxx71zSSQ+1SW8uzjHFT
         g.fillText(ch, 0, 0); g.restore();
         cx += g.measureText(ch).width * k;
       }
-      // worn: little bits knocked out, like chalk on rough plaster
+      }
+      // worn: little bits knocked out, like ink on rough stone
       g.globalCompositeOperation = 'destination-out';
-      for (let i = 0; i < 2600; i++) { g.globalAlpha = rnd() * 0.7; g.fillRect(rnd() * 2048, rnd() * 384, 2 + rnd() * 5, 1 + rnd() * 3); }
+      for (let i = 0; i < (opts.wear || 2600); i++) { g.globalAlpha = rnd() * 0.7; g.fillRect(rnd() * 2048, rnd() * 384, 2 + rnd() * 5, 1 + rnd() * 3); }
       const tex = new THREE.CanvasTexture(c); tex.colorSpace = THREE.NoColorSpace;
       const mat = new THREE.ShaderMaterial({
         transparent: true, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -4,
         vertexShader: `varying vec2 vUv; varying vec3 vN; void main(){ vUv = uv; vN = normalize(mat3(modelMatrix) * normal); gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
-        fragmentShader: `varying vec2 vUv; varying vec3 vN; uniform sampler2D uText; uniform vec3 uInk; ${LIGHT}
+        fragmentShader: opts.uv
+          ? `varying vec2 vUv; uniform sampler2D uText; uniform vec2 uLightPos; uniform float uBeamRadius; uniform float uPower; uniform float uUV;
+            void main(){
+              float inBeam = 1.0 - smoothstep(uBeamRadius * 0.15, uBeamRadius * 0.9, distance(gl_FragCoord.xy, uLightPos));
+              float a = texture2D(uText, vUv).a * inBeam * uPower * uUV;
+              if (a < 0.003) discard;
+              gl_FragColor = vec4(vec3(0.66, 1.0, 0.88) * 1.25, a);
+            }`
+          : `varying vec2 vUv; varying vec3 vN; uniform sampler2D uText; uniform vec3 uInk; ${LIGHT}
           void main(){ float a = texture2D(uText, vUv).a; if (a < 0.01) discard; gl_FragColor = vec4(shade(uInk, vN), a * 0.92); }`,
         uniforms: { uText: { value: tex }, uInk: { value: new THREE.Color(opts.ink || 0xd8d2c4) }, uAmbient: { value: 1 },
-          uBeamRadius: shared.uBeamRadius, uLightPos: shared.uLightPos, uPower: shared.uPower, uBoost: shared.uBoost, uAmbK: shared.uAmbK },
+          uBeamRadius: shared.uBeamRadius, uLightPos: shared.uLightPos, uPower: shared.uPower, uBoost: shared.uBoost, uAmbK: shared.uAmbK, uUV: shared.uUV },
+        ...(opts.uv ? { blending: THREE.AdditiveBlending, depthTest: false } : {}), // UV ink: never hidden by bumps in the floor
       });
       const m = new THREE.Mesh(new THREE.PlaneGeometry(width, width * 384 / 2048), mat);
       m.position.copy(hit.point).addScaledVector(nrm, 0.03);
-      m.lookAt(m.position.clone().add(nrm));
+      if (opts.up) {
+        // lying on the floor: the top of the letters points along opts.up (away from the reader)
+        const up = new THREE.Vector3(...opts.up); up.addScaledVector(nrm, -up.dot(nrm)).normalize();
+        m.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(new THREE.Vector3().crossVectors(up, nrm), up, nrm));
+      } else m.lookAt(m.position.clone().add(nrm));
       m.rotateZ(opts.tilt || 0);
       m.renderOrder = 5;
       scene.add(m);
