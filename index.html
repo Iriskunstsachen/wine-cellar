@@ -81,6 +81,9 @@ html,body{margin:0;height:100%;background:#050505;color:#fff;overflow:hidden;ove
 }
 /* narrow windows: no room for the scan readout next to the room name */
 @media (max-width:700px){ .scan-info{display:none} }
+/* recording mode (?record): a clean picture; the arrows stay, invisible but working */
+.clean .help,.clean .sound,.clean .title,.clean .scan-info,.clean .reticle,.clean .touch-label{display:none!important}
+.clean .touch-btn{opacity:0}
 @media (hover:hover) and (pointer:fine){
   #stage,#stage *{cursor:none}
   #stage button,#stage button *{cursor:pointer}
@@ -3449,6 +3452,7 @@ D1pp6049aaetAxh60UHrRQWFFFFACg4pyt6UynLQNEqHFShge2KiXpUkfWgosxx71zSSQ+1SW8uzjHFT
 
   ready = true;
 
+
   // Video recorder hook (used only by _build/record.js, never by the piece itself):
   // fixed output size, the camera, light, battery and high beam set from outside.
   // Video recorder hook (used only by _build/record.js, never by the piece itself):
@@ -3540,6 +3544,17 @@ D1pp6049aaetAxh60UHrRQWFFFFACg4pyt6UynLQNEqHFShge2KiXpUkfWgosxx71zSSQ+1SW8uzjHFT
       return { x: +m.position.x.toFixed(2), y: +m.position.y.toFixed(2), z: +m.position.z.toFixed(2), dist: +hit.distance.toFixed(2) };
     },
   };
+
+  // Recording mode (link ending in ?record), for filming the piece on a phone:
+  // no text or buttons in the picture (the arrows stay where they are, invisible
+  // but still working), high beam on, the dark room faintly visible, and the
+  // date written on the wall. Without ?record nothing of this happens.
+  if (/[?&]record\b/.test(location.search)) {
+    stage.classList.add('clean');
+    setHighBeam(true);
+    shared.uAmbK.value = 2.4;
+    window.__rec.writing('29. November 2026', 1.6, 2.0, -0.35, 3.27, 0.1, 0.7, { tilt: -0.02, ink: 0x2b2724 });
+  }
 
   // Debug hook for building the piece (position + view); harmless in the final file.
   window.__room = {
