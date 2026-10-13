@@ -2397,14 +2397,18 @@ D1pp6049aaetAxh60UHrRQWFFFFACg4pyt6UynLQNEqHFShge2KiXpUkfWgosxx71zSSQ+1SW8uzjHFT
     n.start(t, rand(0, 1.5), len);
   }
   function stoneStep(t, dest, v) {
+    // no two steps alike: firmer or softer, more or less scuff, sometimes the heel
+    // lands twice (a little slip), a slightly different floor spot each time
+    const firm = rand(0.6, 1.15), scuff = rand(0.4, 1.6), tone = rand(0.8, 1.25);
     // heel: the impact (dull, short) and the stone's low body under it
-    noiseHit(t, dest, 0.16 * v, 'lowpass', rand(1500, 2400), 0.7, 0.0015, rand(0.03, 0.05), 0.08);
-    noiseHit(t, dest, 0.12 * v, 'bandpass', rand(170, 260), 1.1, 0.002, rand(0.05, 0.08), 0.12);
+    noiseHit(t, dest, 0.16 * v * firm, 'lowpass', rand(1300, 2500) * tone, 0.7, rand(0.0012, 0.003), rand(0.025, 0.055), 0.08);
+    noiseHit(t, dest, 0.12 * v * firm, 'bandpass', rand(150, 280) * tone, rand(0.8, 1.4), 0.002, rand(0.045, 0.09), 0.12);
+    if (Math.random() < 0.18) noiseHit(t + rand(0.012, 0.025), dest, 0.06 * v * firm, 'lowpass', rand(1200, 2000), 0.7, 0.0015, 0.03, 0.06);
     // the sole rolling and scuffing over the dust
-    const ts = t + rand(0.025, 0.045);
-    noiseHit(ts, dest, rand(0.018, 0.035) * v, 'bandpass', rand(900, 2000), 0.8, rand(0.012, 0.025), rand(0.06, 0.11), 0.16);
-    // toe pushing off
-    noiseHit(t + rand(0.09, 0.14), dest, rand(0.03, 0.05) * v, 'lowpass', rand(2200, 3200), 0.7, 0.002, rand(0.02, 0.035), 0.06);
+    const ts = t + rand(0.02, 0.055);
+    noiseHit(ts, dest, rand(0.015, 0.032) * v * scuff, 'bandpass', rand(800, 2300), rand(0.6, 1.1), rand(0.01, 0.03), rand(0.05, 0.13), 0.18);
+    // toe pushing off (sometimes hardly at all)
+    if (Math.random() < 0.85) noiseHit(t + rand(0.085, 0.16), dest, rand(0.015, 0.05) * v, 'lowpass', rand(2000, 3400), 0.7, 0.002, rand(0.018, 0.04), 0.06);
   }
   function grit(t, dest, amount) {
     const grains = Math.floor(rand(6, 14) * amount);
@@ -2449,13 +2453,13 @@ D1pp6049aaetAxh60UHrRQWFFFFACg4pyt6UynLQNEqHFShge2KiXpUkfWgosxx71zSSQ+1SW8uzjHFT
     stepCount++;
     const t = ctx.currentTime + 0.01;
     stepSide = -stepSide;
-    const bus = ctx.createGain(); bus.gain.value = 1.25;
+    const bus = ctx.createGain(); bus.gain.value = 0.82; // steps a little quieter, under the room
     const p = panner(0.15 * stepSide);
     // footsteps and glass: completely dry, no echo
     if (p) { bus.connect(p); out(p, 0); } else out(bus, 0);
     const v = rand(0.85, 1.15);
     stoneStep(t, bus, v * (stepSide > 0 ? 1 : rand(0.85, 0.95))); // one foot lands a touch softer
-    grit(t + rand(0.01, 0.04), bus, 0.6);
+    grit(t + rand(0.01, 0.04), bus, rand(0.2, 0.9));
     // only where broken glass and bottles really lie on the floor (almost every step there)
     if (onGlass && Math.random() < 0.85) glass(t + rand(0.01, 0.05), bus);
     // now and then a small stone rolling away
@@ -2471,6 +2475,23 @@ D1pp6049aaetAxh60UHrRQWFFFFACg4pyt6UynLQNEqHFShge2KiXpUkfWgosxx71zSSQ+1SW8uzjHFT
     }
   }
 
+  // the mode button of the lamp: press and latch, two dry clicks close together
+  function switchClick() {
+    const t = ctx.currentTime + 0.005;
+    [[0, 0.16, 2600], [rand(0.022, 0.032), 0.1, 3600]].forEach(([dt, gain, f]) => {
+      const n = ctx.createBufferSource(); n.buffer = whiteBuf;
+      const bp = ctx.createBiquadFilter(); bp.type = 'bandpass'; bp.frequency.value = f; bp.Q.value = 1.6;
+      const g = ctx.createGain(); env(g, t + dt, gain, 0.0006, 0.012);
+      n.connect(bp); bp.connect(g); out(g, 0);
+      n.start(t + dt, rand(0, 1.5), 0.03);
+      // the plastic housing: a tiny low knock under the click
+      const k = ctx.createBufferSource(); k.buffer = whiteBuf;
+      const lp = ctx.createBiquadFilter(); lp.type = 'bandpass'; lp.frequency.value = rand(700, 1000); lp.Q.value = 4;
+      const kg = ctx.createGain(); env(kg, t + dt, gain * 0.35, 0.0008, 0.02);
+      k.connect(lp); lp.connect(kg); out(kg, 0);
+      k.start(t + dt, rand(0, 1.5), 0.04);
+    });
+  }
   function flashlightClick() {
     const t = ctx.currentTime + 0.05;
     const n = ctx.createBufferSource(); n.buffer = whiteBuf;
@@ -2524,7 +2545,7 @@ D1pp6049aaetAxh60UHrRQWFFFFACg4pyt6UynLQNEqHFShge2KiXpUkfWgosxx71zSSQ+1SW8uzjHFT
     const run = {
       step: (e) => footstep(false), glass: (e) => footstep(true),
       flicker: (e) => RoomSound.flicker(e.v == null ? 0.6 : e.v), shake: () => RoomSound.shake(),
-      click: () => flashlightClick(), knock: () => knock(ctx.currentTime + 0.01), rumble: () => rumble(), rat: () => rat(),
+      click: () => flashlightClick(), switch: () => switchClick(), knock: () => knock(ctx.currentTime + 0.01), rumble: () => rumble(), rat: () => rat(),
     };
     // events happen at suspension points (multiples of the 128-sample render quantum)
     const oc = ctx, byQ = new Map();
@@ -2823,7 +2844,8 @@ D1pp6049aaetAxh60UHrRQWFFFFACg4pyt6UynLQNEqHFShge2KiXpUkfWgosxx71zSSQ+1SW8uzjHFT
           a *= 0.3 + 0.7 * smoothstep(0.2, 0.7, pore);              // the grain of the concrete shows through
           float d = distance(gl_FragCoord.xy, uLightPos);
           float inBeam = 1.0 - smoothstep(uBeamRadius * 0.12, uBeamRadius * 0.95, d);
-          col += vec3(0.62, 1.0, 0.86) * a * inBeam * uPower * uUV * 0.85;
+          float relief = 0.65 + 0.35 * max(dot(normalize(vWorldNormal), normalize(vec3(0.2, 1.0, 0.3))), 0.0);
+          col += vec3(0.72, 0.84, 1.0) * a * relief * inBeam * uPower * uUV * 0.9;
         }
       }
       gl_FragColor = vec4(col, 1.0);
@@ -3587,8 +3609,14 @@ D1pp6049aaetAxh60UHrRQWFFFFACg4pyt6UynLQNEqHFShge2KiXpUkfWgosxx71zSSQ+1SW8uzjHFT
         }
         x0 += adv(ch);
       }
-      // dry, porous: little bits where the ink did not take
+      // the ink bled a little into the pores around each stroke
+      const strokes = g.getImageData(0, 0, 2048, 512);
+      g.save(); g.globalCompositeOperation = 'destination-over'; g.filter = 'blur(5px)'; g.globalAlpha = 0.35;
+      const tmp = document.createElement('canvas'); tmp.width = 2048; tmp.height = 512; tmp.getContext('2d').putImageData(strokes, 0, 0);
+      g.drawImage(tmp, 0, 0); g.restore(); g.filter = 'none';
+      // dry, porous: little bits where the ink did not take; dust lying over it in patches
       g.globalCompositeOperation = 'destination-out';
+      for (let i = 0; i < 70; i++) { g.globalAlpha = 0.15 + rnd() * 0.35; g.beginPath(); g.ellipse(rnd() * 2048, rnd() * 512, 20 + rnd() * 70, 10 + rnd() * 35, rnd() * 3, 0, 6.3); g.fill(); }
       for (let i = 0; i < 9000; i++) { g.globalAlpha = rnd() * 0.6; g.beginPath(); g.arc(rnd() * 2048, rnd() * 512, 0.8 + rnd() * 2.6, 0, 6.3); g.fill(); }
       const tex = new THREE.CanvasTexture(c); tex.colorSpace = THREE.NoColorSpace;
       const n = new THREE.Vector3(0, 1, 0);
