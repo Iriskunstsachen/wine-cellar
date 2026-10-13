@@ -2453,7 +2453,7 @@ D1pp6049aaetAxh60UHrRQWFFFFACg4pyt6UynLQNEqHFShge2KiXpUkfWgosxx71zSSQ+1SW8uzjHFT
     stepCount++;
     const t = ctx.currentTime + 0.01;
     stepSide = -stepSide;
-    const bus = ctx.createGain(); bus.gain.value = 0.82; // steps a little quieter, under the room
+    const bus = ctx.createGain(); bus.gain.value = 0.55; // steps quiet, under the room
     const p = panner(0.15 * stepSide);
     // footsteps and glass: completely dry, no echo
     if (p) { bus.connect(p); out(p, 0); } else out(bus, 0);
