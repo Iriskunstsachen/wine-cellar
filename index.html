@@ -2021,7 +2021,7 @@ D1pp6049aaetAxh60UHrRQWFFFFACg4pyt6UynLQNEqHFShge2KiXpUkfWgosxx71zSSQ+1SW8uzjHFT
 // Based on the soundscape of iriskienzl.com, tuned for a wine cellar: a room
 // tone like a real recording (see below), very rare distant knocks, wind far away
 // above ground, now and then a rat. Footsteps on a gritty stone floor (with
-// broken glass where it lies on the floor). A short, dark cellar echo.
+// broken glass where it lies on the floor). Completely dry, no echo.
 // Browsers only allow sound after a click, so it starts with "Enter".
 (function () {
   const AC = window.AudioContext || window.webkitAudioContext;
@@ -2082,9 +2082,12 @@ D1pp6049aaetAxh60UHrRQWFFFFACg4pyt6UynLQNEqHFShge2KiXpUkfWgosxx71zSSQ+1SW8uzjHFT
     return buf;
   }
   // Everything goes to the output plus a little echo send.
+  // Everything dry: no echo / reverb at all (Iris: a hall sounds unnatural here).
+  // The cellar echo (cellarImpulse) is kept in the code but no longer used.
+  const REVERB = false;
   function out(node, send = 0.22) {
     node.connect(dry);
-    if (wet && send) { const s = ctx.createGain(); s.gain.value = send; node.connect(s); s.connect(wet); }
+    if (REVERB && wet && send) { const s = ctx.createGain(); s.gain.value = send; node.connect(s); s.connect(wet); }
   }
   function sweep(p, t, dur, from) {
     const a = from * rand(0.85, 1), b = -from * rand(0.6, 1);
@@ -2814,10 +2817,13 @@ D1pp6049aaetAxh60UHrRQWFFFFACg4pyt6UynLQNEqHFShge2KiXpUkfWgosxx71zSSQ+1SW8uzjHFT
         vec3 ip = (uInkMat * vec4(vWorld, 1.0)).xyz;
         if (abs(ip.x) < 0.5 && abs(ip.y) < 0.5 && abs(ip.z) < 0.12) {
           float a = texture2D(uInkTex, ip.xy + 0.5).a * (1.0 - smoothstep(0.05, 0.12, abs(ip.z)));
-          a *= 0.55 + 0.45 * smoothstep(0.08, 0.45, dot(tex, vec3(0.3, 0.59, 0.11)));
+          float lumF = dot(tex, vec3(0.3, 0.59, 0.11));
+          a *= 0.35 + 0.65 * smoothstep(0.06, 0.4, lumF);          // soaked in less on dark, dirty spots
+          float pore = fract(sin(dot(floor(vWorld * 320.0), vec3(12.9898, 78.233, 37.719))) * 43758.5453);
+          a *= 0.3 + 0.7 * smoothstep(0.2, 0.7, pore);              // the grain of the concrete shows through
           float d = distance(gl_FragCoord.xy, uLightPos);
           float inBeam = 1.0 - smoothstep(uBeamRadius * 0.12, uBeamRadius * 0.95, d);
-          col += vec3(0.62, 1.0, 0.86) * a * inBeam * uPower * uUV * 1.5;
+          col += vec3(0.62, 1.0, 0.86) * a * inBeam * uPower * uUV * 0.85;
         }
       }
       gl_FragColor = vec4(col, 1.0);
@@ -3541,22 +3547,49 @@ D1pp6049aaetAxh60UHrRQWFFFFACg4pyt6UynLQNEqHFShge2KiXpUkfWgosxx71zSSQ+1SW8uzjHFT
       const c = document.createElement('canvas'); c.width = 2048; c.height = 512;
       const g = c.getContext('2d');
       let seed = 9; const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
-      g.fillStyle = '#fff'; g.textBaseline = 'middle';
-      g.font = `${opts.size || 128}px "Courier New", Courier, monospace`;
-      const sp = opts.spacing || 34;
-      const tw = [...text].reduce((s, ch) => s + g.measureText(ch).width + sp, -sp), k = Math.min(1, 1900 / tw);
-      let cx = (2048 - tw * k) / 2;
-      g.filter = 'blur(2.2px)'; // a pen on rough stone: soft, bled edges
+      g.fillStyle = '#fff';
+      // handwritten digits, as strokes of a marker on rough concrete (glyph box: 0.62 wide, 1 high)
+      const GL = {
+        '0': [[[0.31, 0.03], [0.64, 0.02], [0.62, 0.99], [0.3, 0.98]], [[0.3, 0.98], [-0.02, 0.97], [0.0, 0.03], [0.33, 0.05]]],
+        '1': [[[0.1, 0.22], [0.18, 0.15], [0.28, 0.08], [0.34, 0.02]], [[0.34, 0.02], [0.33, 0.35], [0.31, 0.7], [0.3, 0.99]]],
+        '2': [[[0.04, 0.27], [0.08, -0.02], [0.6, 0.0], [0.53, 0.32]], [[0.53, 0.32], [0.48, 0.55], [0.14, 0.72], [0.02, 0.98]], [[0.02, 0.98], [0.2, 0.95], [0.42, 0.97], [0.62, 0.94]]],
+        '6': [[[0.52, 0.06], [0.28, -0.04], [0.02, 0.2], [0.05, 0.62]], [[0.05, 0.62], [0.07, 1.02], [0.55, 1.02], [0.54, 0.7]], [[0.54, 0.7], [0.53, 0.43], [0.14, 0.42], [0.07, 0.66]]],
+        '9': [[[0.52, 0.3], [0.52, 0.0], [0.05, 0.02], [0.07, 0.3]], [[0.07, 0.3], [0.09, 0.56], [0.5, 0.54], [0.52, 0.28]], [[0.52, 0.28], [0.5, 0.55], [0.48, 0.78], [0.44, 0.99]]],
+        '.': 'dot',
+      };
+      const H = 250, slant = 0.13, bez = (p, t) => {
+        const u = 1 - t; return [u * u * u * p[0][0] + 3 * u * u * t * p[1][0] + 3 * u * t * t * p[2][0] + t * t * t * p[3][0],
+                                 u * u * u * p[0][1] + 3 * u * u * t * p[1][1] + 3 * u * t * t * p[2][1] + t * t * t * p[3][1]];
+      };
+      const adv = (ch) => (ch === '.' ? 0.32 : 0.74) * H;
+      const total = [...text].reduce((s, ch) => s + adv(ch), 0);
+      let x0 = (2048 - total) / 2;
+      // a stroke: many small overlapping dabs; the pen presses harder in the middle of a
+      // stroke, skips a little where the floor is rough
+      const dab = (x, y, r, a) => { g.globalAlpha = a; g.beginPath(); g.arc(x, y, r, 0, 6.283); g.fill(); };
       for (const ch of text) {
-        g.save(); g.translate(cx, 256 + (rnd() - 0.5) * 10); g.rotate((rnd() - 0.5) * 0.05);
-        g.scale(k, k); g.globalAlpha = 0.5 + rnd() * 0.5;
-        g.fillText(ch, 0, 0); g.restore();
-        cx += (g.measureText(ch).width + sp) * k;
+        const gl = GL[ch], s = H * (0.94 + rnd() * 0.1), rot = (rnd() - 0.5) * 0.07, by = 256 - H / 2 + (rnd() - 0.5) * 14;
+        const map = ([px, py]) => {
+          const xx = px * s + (1 - py) * s * slant, yy = py * s;
+          return [x0 + xx * Math.cos(rot) - (yy - s / 2) * Math.sin(rot), by + s / 2 + xx * Math.sin(rot) + (yy - s / 2) * Math.cos(rot)];
+        };
+        if (gl === 'dot') { const [x, y] = map([0.12, 0.95]); for (let k = 0; k < 6; k++) dab(x + (rnd() - 0.5) * 6, y + (rnd() - 0.5) * 6, 9 + rnd() * 4, 0.9); }
+        else for (const seg of gl) {
+          const N = 70;
+          let skip = 0;
+          for (let k = 0; k <= N; k++) {
+            const t = k / N, [x, y] = map(bez(seg, t));
+            if (skip > 0) { skip--; continue; }
+            if (rnd() < 0.012) skip = 1 + Math.floor(rnd() * 3); // the pen skips over a bump
+            const press = 0.75 + 0.35 * Math.sin(Math.PI * t);
+            dab(x + (rnd() - 0.5) * 2.5, y + (rnd() - 0.5) * 2.5, (7 + rnd() * 2.5) * press, 0.5 + rnd() * 0.4);
+          }
+        }
+        x0 += adv(ch);
       }
-      g.filter = 'none';
-      // patchy: the ink took better in some places than in others
+      // dry, porous: little bits where the ink did not take
       g.globalCompositeOperation = 'destination-out';
-      for (let i = 0; i < 5200; i++) { g.globalAlpha = rnd() * 0.55; const r = 1 + rnd() * 4; g.beginPath(); g.arc(rnd() * 2048, rnd() * 512, r, 0, 6.3); g.fill(); }
+      for (let i = 0; i < 9000; i++) { g.globalAlpha = rnd() * 0.6; g.beginPath(); g.arc(rnd() * 2048, rnd() * 512, 0.8 + rnd() * 2.6, 0, 6.3); g.fill(); }
       const tex = new THREE.CanvasTexture(c); tex.colorSpace = THREE.NoColorSpace;
       const n = new THREE.Vector3(0, 1, 0);
       const u = new THREE.Vector3(...up); u.addScaledVector(n, -u.dot(n)).normalize();
