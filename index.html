@@ -2397,18 +2397,18 @@ D1pp6049aaetAxh60UHrRQWFFFFACg4pyt6UynLQNEqHFShge2KiXpUkfWgosxx71zSSQ+1SW8uzjHFT
     n.start(t, rand(0, 1.5), len);
   }
   function stoneStep(t, dest, v) {
-    // no two steps alike: firmer or softer, more or less scuff, sometimes the heel
-    // lands twice (a little slip), a slightly different floor spot each time
-    const firm = rand(0.6, 1.15), scuff = rand(0.4, 1.6), tone = rand(0.8, 1.25);
-    // heel: the impact (dull, short) and the stone's low body under it
-    noiseHit(t, dest, 0.16 * v * firm, 'lowpass', rand(1300, 2500) * tone, 0.7, rand(0.0012, 0.003), rand(0.025, 0.055), 0.08);
-    noiseHit(t, dest, 0.12 * v * firm, 'bandpass', rand(150, 280) * tone, rand(0.8, 1.4), 0.002, rand(0.045, 0.09), 0.12);
-    if (Math.random() < 0.18) noiseHit(t + rand(0.012, 0.025), dest, 0.06 * v * firm, 'lowpass', rand(1200, 2000), 0.7, 0.0015, 0.03, 0.06);
-    // the sole rolling and scuffing over the dust
-    const ts = t + rand(0.02, 0.055);
-    noiseHit(ts, dest, rand(0.015, 0.032) * v * scuff, 'bandpass', rand(800, 2300), rand(0.6, 1.1), rand(0.01, 0.03), rand(0.05, 0.13), 0.18);
-    // toe pushing off (sometimes hardly at all)
-    if (Math.random() < 0.85) noiseHit(t + rand(0.085, 0.16), dest, rand(0.015, 0.05) * v, 'lowpass', rand(2000, 3400), 0.7, 0.002, rand(0.018, 0.04), 0.06);
+    // soft, careful steps (soft soles, not heels): the foot is set down gently, so
+    // there is hardly any thud; what you hear is mostly the sole rolling over the
+    // dust. No two steps alike.
+    const firm = rand(0.6, 1.1), scuff = rand(0.6, 1.5), tone = rand(0.85, 1.2);
+    // the heel set down: a soft, muffled touch (slow attack, no deep body)
+    noiseHit(t, dest, 0.07 * v * firm, 'lowpass', rand(800, 1300) * tone, 0.6, rand(0.006, 0.011), rand(0.04, 0.065), 0.1);
+    noiseHit(t, dest, 0.025 * v * firm, 'bandpass', rand(320, 480) * tone, 0.9, rand(0.006, 0.01), rand(0.04, 0.06), 0.1);
+    // the sole rolling over the dust: the main sound of the step
+    const ts = t + rand(0.02, 0.05);
+    noiseHit(ts, dest, rand(0.02, 0.036) * v * scuff, 'bandpass', rand(900, 2200), rand(0.6, 1.0), rand(0.02, 0.04), rand(0.07, 0.14), 0.2);
+    // toe leaving the floor, very light (sometimes not at all)
+    if (Math.random() < 0.7) noiseHit(t + rand(0.1, 0.17), dest, rand(0.008, 0.022) * v, 'lowpass', rand(1800, 2800), 0.7, 0.004, rand(0.02, 0.035), 0.06);
   }
   function grit(t, dest, amount) {
     const grains = Math.floor(rand(6, 14) * amount);
@@ -2453,7 +2453,7 @@ D1pp6049aaetAxh60UHrRQWFFFFACg4pyt6UynLQNEqHFShge2KiXpUkfWgosxx71zSSQ+1SW8uzjHFT
     stepCount++;
     const t = ctx.currentTime + 0.01;
     stepSide = -stepSide;
-    const bus = ctx.createGain(); bus.gain.value = 0.55; // steps quiet, under the room
+    const bus = ctx.createGain(); bus.gain.value = 0.9; // soft steps, just above the room tone
     const p = panner(0.15 * stepSide);
     // footsteps and glass: completely dry, no echo
     if (p) { bus.connect(p); out(p, 0); } else out(bus, 0);
