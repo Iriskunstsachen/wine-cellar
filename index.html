@@ -2195,9 +2195,9 @@ D1pp6049aaetAxh60UHrRQWFFFFACg4pyt6UynLQNEqHFShge2KiXpUkfWgosxx71zSSQ+1SW8uzjHFT
     const g = ctx.createGain(); g.gain.value = TONE;
     lp2.connect(g); out(g, 0);
     src.start(0, rand(0, 13));
-    // irregular drift of the level (a random walk, ±2 dB, slow)
+    // irregular drift of the level (a random walk, ±2 dB, slow); not in an offline render
     let lvl = 0;
-    (function drift() {
+    if (!offline) (function drift() {
       if (ctx.state === 'running') {
         lvl = Math.max(-2, Math.min(2, lvl + rand(-0.8, 0.8)));
         const t = ctx.currentTime, dur = rand(1.5, 4.5);
@@ -2431,8 +2431,9 @@ D1pp6049aaetAxh60UHrRQWFFFFACg4pyt6UynLQNEqHFShge2KiXpUkfWgosxx71zSSQ+1SW8uzjHFT
     }
   }
   let stepCount = 0;
+  let offline = false; // rendering a soundtrack for the video (see renderOffline)
   function footstep(onGlass) {
-    if (!ctx || ctx.state !== 'running' || !enabled) return;
+    if (!ctx || (ctx.state !== 'running' && !offline) || !enabled) return;
     stepCount++;
     const t = ctx.currentTime + 0.01;
     stepSide = -stepSide;
@@ -2495,7 +2496,41 @@ D1pp6049aaetAxh60UHrRQWFFFFACg4pyt6UynLQNEqHFShge2KiXpUkfWgosxx71zSSQ+1SW8uzjHFT
     });
   }
 
+  // The soundtrack of a video, rendered offline (not in real time): the room
+  // tone plus events at given seconds: { t, kind: 'step' | 'glass' | 'flicker'
+  // | 'shake' | 'click' | 'knock' | 'rumble' | 'rat', v }. Returns an AudioBuffer.
+  async function renderOffline(sec, events, rate = 48000) {
+    const keep = { ctx, master, dry, wet, whiteBuf, pinkBuf, enabled, started };
+    ctx = new OfflineAudioContext(2, Math.ceil(sec * rate), rate);
+    offline = true; enabled = true;
+    master = ctx.createGain(); master.gain.value = 0.9;
+    const comp = ctx.createDynamicsCompressor(); master.connect(comp); comp.connect(ctx.destination);
+    dry = ctx.createGain(); dry.connect(master);
+    const conv = ctx.createConvolver(); conv.buffer = cellarImpulse();
+    wet = ctx.createGain(); wet.connect(conv); conv.connect(master);
+    whiteBuf = noiseBuffer(2);
+    ambience();
+    const run = {
+      step: (e) => footstep(false), glass: (e) => footstep(true),
+      flicker: (e) => RoomSound.flicker(e.v == null ? 0.6 : e.v), shake: () => RoomSound.shake(),
+      click: () => flashlightClick(), knock: () => knock(ctx.currentTime + 0.01), rumble: () => rumble(), rat: () => rat(),
+    };
+    // events happen at suspension points (multiples of the 128-sample render quantum)
+    const oc = ctx, byQ = new Map();
+    for (const e of events) {
+      const q = Math.max(1, Math.round(e.t * rate / 128));
+      if (!byQ.has(q)) byQ.set(q, []);
+      byQ.get(q).push(e);
+    }
+    for (const [q, list] of byQ) oc.suspend(q * 128 / rate).then(() => { list.forEach((e) => run[e.kind](e)); oc.resume(); });
+    const buf = await oc.startRendering();
+    ({ ctx, master, dry, wet, whiteBuf, pinkBuf, enabled, started } = keep);
+    offline = false;
+    return buf;
+  }
+
   window.RoomSound = {
+    renderOffline,
     state() { return ctx ? ctx.state : 'not started'; },
     _test: { steps: () => stepCount, glass: () => ctx && glass(ctx.currentTime + 0.05, dry), drips: () => ctx && drips(), knock: () => ctx && knock(ctx.currentTime + 0.05), rat: () => ctx && rat(), gust: () => ctx && gust(), wind: () => ctx && windOutside() },
     // Walking into something: 'wall' = a dull bump (shoulder / hand against
@@ -2533,7 +2568,7 @@ D1pp6049aaetAxh60UHrRQWFFFFACg4pyt6UynLQNEqHFShge2KiXpUkfWgosxx71zSSQ+1SW8uzjHFT
     // metal tube. A dry tick (1–2 ms) with a tiny metallic ring of the tube
     // and a short knock of the housing; sometimes 2–3 ticks in a row (chatter).
     flicker(v = 0.5) {
-      if (!ctx || ctx.state !== 'running' || !enabled) return;
+      if (!ctx || (ctx.state !== 'running' && !offline) || !enabled) return;
       const t0 = ctx.currentTime + 0.003;
       const n = Math.random() < 0.55 ? 1 : 1 + Math.floor(rand(1, 3));
       let t = t0;
@@ -2552,6 +2587,8 @@ D1pp6049aaetAxh60UHrRQWFFFFACg4pyt6UynLQNEqHFShge2KiXpUkfWgosxx71zSSQ+1SW8uzjHFT
         t += rand(0.05, 0.12);
       }
     },
+    // one footstep, at the moment the viewer's stride lands (keeps sound and bob in sync)
+    step(onGlass) { footstep(onGlass); },
     walked(d, onGlass) {
       const now = performance.now();
       if (!(d > 0.002)) return;
@@ -2688,7 +2725,7 @@ D1pp6049aaetAxh60UHrRQWFFFFACg4pyt6UynLQNEqHFShge2KiXpUkfWgosxx71zSSQ+1SW8uzjHFT
   // Laptop/desktop: solid only inside the beam, fine points elsewhere.
   // Phones/tablets: the plain solid scan (lighter on the GPU).
   const MOBILE = matchMedia('(pointer: coarse)').matches;
-  const RENDER = MOBILE ? 'mesh' : 'mix';
+  const RENDER = MOBILE || /[?&]mesh\b/.test(location.search) ? 'mesh' : 'mix';
 
   // ---------- shaders (flashlight) ----------
   const LIGHT = `
@@ -2697,6 +2734,7 @@ D1pp6049aaetAxh60UHrRQWFFFFACg4pyt6UynLQNEqHFShge2KiXpUkfWgosxx71zSSQ+1SW8uzjHFT
     uniform float uAmbient;
     uniform float uPower; // battery: 1 = full, 0 = out (flicker)
     uniform float uBoost; // high beam: 0 = normal, 1 = high
+    uniform float uAmbK;  // how much of the room shows outside the beam (1 = as in the piece)
     vec3 shade(vec3 tex, vec3 n){
       tex = tex * 0.86 + vec3(0.08);
       float d = distance(gl_FragCoord.xy, uLightPos);
@@ -2707,7 +2745,7 @@ D1pp6049aaetAxh60UHrRQWFFFFACg4pyt6UynLQNEqHFShge2KiXpUkfWgosxx71zSSQ+1SW8uzjHFT
       vec3 L = normalize(vec3(0.18, 0.94, 0.10));
       float diff = max(dot(n, L), 0.0);
       float ambient = 0.022 + 0.02 * diff;
-      float illum = ambient * uAmbient + beam * (0.78 + diff * 0.28);
+      float illum = ambient * uAmbient * uAmbK + beam * (0.78 + diff * 0.28);
       // a weak battery gives a dimmer, warmer, more orange light
       vec3 tint = mix(vec3(1.25, 0.88, 0.6), vec3(1.10, 1.04, 0.95), clamp(uPower * 1.2 - 0.1, 0.0, 1.0));
       vec3 warm = mix(tex, tex * tint, min(1.0, beam * 4.0) * 0.55);
@@ -2791,6 +2829,7 @@ D1pp6049aaetAxh60UHrRQWFFFFACg4pyt6UynLQNEqHFShge2KiXpUkfWgosxx71zSSQ+1SW8uzjHFT
     uRes: { value: new THREE.Vector2(1, 1) },
     uPower: { value: 1 },
     uBoost: { value: 0 },
+    uAmbK: { value: 1 },
   };
 
   function flashlightMaterial(src) {
@@ -2819,7 +2858,7 @@ D1pp6049aaetAxh60UHrRQWFFFFACg4pyt6UynLQNEqHFShge2KiXpUkfWgosxx71zSSQ+1SW8uzjHFT
         uAmbient: { value: 1 },
         uPush: { value: RENDER === 'mix' ? -0.01 : 0 },
         uBeamRadius: shared.uBeamRadius, uLightPos: shared.uLightPos,
-        uPower: shared.uPower, uBoost: shared.uBoost,
+        uPower: shared.uPower, uBoost: shared.uBoost, uAmbK: shared.uAmbK,
       },
     });
   }
@@ -2832,7 +2871,7 @@ D1pp6049aaetAxh60UHrRQWFFFFACg4pyt6UynLQNEqHFShge2KiXpUkfWgosxx71zSSQ+1SW8uzjHFT
         uSize: { value: size }, uScale: shared.uScale, uRes: shared.uRes,
         uAmbient: { value: 0.3 },
         uBeamRadius: shared.uBeamRadius, uLightPos: shared.uLightPos,
-        uPower: shared.uPower, uBoost: shared.uBoost,
+        uPower: shared.uPower, uBoost: shared.uBoost, uAmbK: shared.uAmbK,
       },
     });
   }
@@ -3360,20 +3399,30 @@ D1pp6049aaetAxh60UHrRQWFFFFACg4pyt6UynLQNEqHFShge2KiXpUkfWgosxx71zSSQ+1SW8uzjHFT
     if (mag > 0) moveBy(mx / mag * state.moveSpeed * dt, mz / mag * state.moveSpeed * dt);
     camReadout.textContent = `X ${cam.x.toFixed(2)} / Z ${cam.z.toFixed(2)}`;
   }
-  function render(now) {
-    const dt = Math.min(0.033, (now - prev) / 1000);
-    prev = now;
+  // Steps: one stride every 0.62 m. The view bobs with the stride and is at its
+  // lowest when the heel strikes, exactly when the footstep is heard. After
+  // standing still, the first step comes at once.
+  let stride = 0, lastWalkT = -1e9;
+  function tick(dt, now, powerOverride) {
     update(dt);
     const moved = Math.hypot(cam.x - lastX, cam.z - lastZ);
     const walking = Object.values(state.keys).some(Boolean) || now - lastWheel < 250;
-    if (window.RoomSound && walking && moved < 1) RoomSound.walked(moved, onGlass(cam.x, cam.z));
-    if (moved < 1) bobPhase += moved / 0.62 * Math.PI * 2;
+    if (walking && moved > 0.002 && moved < 1) {
+      if (now - lastWalkT > 350) stride = 0.62;
+      lastWalkT = now;
+      stride += moved;
+      if (stride >= 0.62) {
+        stride = stride % 0.62;
+        if (window.RoomSound && RoomSound.step) RoomSound.step(onGlass(cam.x, cam.z));
+      }
+    }
+    if (moved < 1) bobPhase = stride / 0.62 * Math.PI * 2;
     const bobTarget = !REDUCED_MOTION && moved > 0.002 ? 1 : 0;
     bobAmp += (bobTarget - bobAmp) * Math.min(1, dt * (bobTarget ? 4 : 2.5));
-    const bobY = Math.sin(bobPhase) * 0.016 * bobAmp;
+    const bobY = -Math.cos(bobPhase) * 0.016 * bobAmp;
     const sway = Math.sin(bobPhase / 2) * 0.008 * bobAmp;
     lastX = cam.x; lastZ = cam.z;
-    const power = battery(dt);
+    const power = powerOverride != null ? powerOverride : battery(dt);
     shared.uPower.value = power;
     const bt = highBeam ? 1 : 0;
     if (Math.abs(bt - boostMix) > 0.001) { boostMix += (bt - boostMix) * Math.min(1, dt * 7); shared.uBoost.value = boostMix; applyBeamSize(); }
@@ -3385,11 +3434,112 @@ D1pp6049aaetAxh60UHrRQWFFFFACg4pyt6UynLQNEqHFShge2KiXpUkfWgosxx71zSSQ+1SW8uzjHFT
     camera.rotation.y = -cam.yaw;
     camera.rotation.x = cam.pitch - jolt * 0.03;
     renderer.render(scene, topCam || camera);
+    return { moved, power };
+  }
+  let recording = false;
+  function render(now) {
+    if (!recording) {
+      const dt = Math.min(0.033, (now - prev) / 1000);
+      prev = now;
+      tick(dt, now);
+    }
     requestAnimationFrame(render);
   }
   requestAnimationFrame(render);
 
   ready = true;
+
+  // Video recorder hook (used only by _build/record.js, never by the piece itself):
+  // fixed output size, the camera, light, battery and high beam set from outside.
+  // Video recorder hook (used only by _build/record.js, never by the piece itself):
+  // it plays the piece like a person would, through the same controls, walking,
+  // collision, bob and steps, frame by frame at a fixed output size.
+  window.__rec = {
+    setup(w, h, scale, ambK = 1) {
+      recording = true;
+      renderer.setPixelRatio(1);
+      renderer.setSize(w, h, false);
+      canvas.style.cssText = `position:fixed;left:0;top:0;width:${w}px;height:${h}px`;
+      camera.aspect = w / h; camera.updateProjectionMatrix();
+      shared.uScale.value = h / (2 * Math.tan(THREE.MathUtils.degToRad(camera.fov) / 2));
+      shared.uRes.value.set(w, h);
+      shared.uAmbK.value = ambK;
+      dpr = 1; beamRadiusPx = Math.min(w, h) * 0.44; applyBeamSize();
+      this.w = w; this.h = h; this.scale = scale; // output px per phone (CSS) px
+      entered = true;
+      return beamRadiusPx;
+    },
+    place(x, z, yaw, pitch) {
+      Object.assign(cam, { x, z, yaw, pitch });
+      rayOrigin.set(x, 2.3, z); rayDir.set(0, -1, 0); const d = firstHit(10);
+      cam.y = (d < Infinity ? 2.3 - d : 0) + CONFIG.eye;
+      floorY = surfaceBelow(x, z) ?? 0;
+      lastX = cam.x; lastZ = cam.z;
+    },
+    // one frame with the player's input: keys held, a finger dragging (dx/dy in output px,
+    // the light under the finger, like on a phone), lamp power and high beam
+    step(f) {
+      for (const k in state.keys) state.keys[k] = !!(f.keys && f.keys[k]);
+      state.moveSpeed = f.speed || 1.2;
+      if (f.dx || f.dy) {
+        cam.yaw += (f.dx / this.scale) * 0.0055;
+        cam.pitch = clamp(cam.pitch - (f.dy / this.scale) * 0.0038, cam.pitchMin, cam.pitchMax);
+      }
+      pointer.x = clamp(f.px, 0, this.w); pointer.y = clamp(f.py, 0, this.h); pointer.active = true;
+      shared.uLightPos.value.set(pointer.x, this.h - pointer.y);
+      highBeam = !!f.high; boostMix = highBeam ? 1 : 0; shared.uBoost.value = boostMix;
+      const r = tick(f.dt, f.now, f.power);
+      return { moved: r.moved, x: cam.x, z: cam.z, yaw: cam.yaw, pitch: cam.pitch };
+    },
+    canvas,
+    ray(x, y, z, yaw, pitch = 0) {
+      const dir = new THREE.Vector3(Math.sin(yaw) * Math.cos(pitch), Math.sin(pitch), -Math.cos(yaw) * Math.cos(pitch));
+      const h = new THREE.Raycaster(new THREE.Vector3(x, y, z), dir, 0.05, 9).intersectObject(model, true)[0];
+      if (!h) return null;
+      const n = h.face.normal.clone().transformDirection(h.object.matrixWorld);
+      return { d: +h.distance.toFixed(2), facing: +Math.abs(n.dot(dir)).toFixed(2), y: +h.point.y.toFixed(2) };
+    },
+    // text on a wall, lit only by the flashlight (like everything else)
+    writing(text, x, y, z, yaw, pitch, width, opts = {}) {
+      const dir = new THREE.Vector3(Math.sin(yaw) * Math.cos(pitch), Math.sin(pitch), -Math.cos(yaw) * Math.cos(pitch));
+      const hit = new THREE.Raycaster(new THREE.Vector3(x, y, z), dir, 0.05, 9).intersectObject(model, true)[0];
+      if (!hit) return null;
+      const nrm = hit.face.normal.clone().transformDirection(hit.object.matrixWorld);
+      if (nrm.dot(dir) > 0) nrm.negate();
+      const c = document.createElement('canvas'); c.width = 2048; c.height = 384;
+      const g = c.getContext('2d');
+      let seed = 5; const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
+      g.fillStyle = '#fff'; g.textBaseline = 'middle';
+      g.font = `${opts.size || 230}px ${opts.font || '"Bradley Hand", "Segoe Print", "Chalkboard", cursive'}`;
+      const tw = g.measureText(text).width, k = Math.min(1, 1960 / tw);
+      let cx = (2048 - tw * k) / 2;
+      for (const ch of text) {
+        g.save(); g.translate(cx, 192 + (rnd() - 0.5) * 22); g.rotate((rnd() - 0.5) * 0.12);
+        g.scale(k * (0.94 + rnd() * 0.12), 0.94 + rnd() * 0.12); g.globalAlpha = 0.75 + rnd() * 0.25;
+        g.fillText(ch, 0, 0); g.restore();
+        cx += g.measureText(ch).width * k;
+      }
+      // worn: little bits knocked out, like chalk on rough plaster
+      g.globalCompositeOperation = 'destination-out';
+      for (let i = 0; i < 2600; i++) { g.globalAlpha = rnd() * 0.7; g.fillRect(rnd() * 2048, rnd() * 384, 2 + rnd() * 5, 1 + rnd() * 3); }
+      const tex = new THREE.CanvasTexture(c); tex.colorSpace = THREE.NoColorSpace;
+      const mat = new THREE.ShaderMaterial({
+        transparent: true, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -4,
+        vertexShader: `varying vec2 vUv; varying vec3 vN; void main(){ vUv = uv; vN = normalize(mat3(modelMatrix) * normal); gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
+        fragmentShader: `varying vec2 vUv; varying vec3 vN; uniform sampler2D uText; uniform vec3 uInk; ${LIGHT}
+          void main(){ float a = texture2D(uText, vUv).a; if (a < 0.01) discard; gl_FragColor = vec4(shade(uInk, vN), a * 0.92); }`,
+        uniforms: { uText: { value: tex }, uInk: { value: new THREE.Color(opts.ink || 0xd8d2c4) }, uAmbient: { value: 1 },
+          uBeamRadius: shared.uBeamRadius, uLightPos: shared.uLightPos, uPower: shared.uPower, uBoost: shared.uBoost, uAmbK: shared.uAmbK },
+      });
+      const m = new THREE.Mesh(new THREE.PlaneGeometry(width, width * 384 / 2048), mat);
+      m.position.copy(hit.point).addScaledVector(nrm, 0.03);
+      m.lookAt(m.position.clone().add(nrm));
+      m.rotateZ(opts.tilt || 0);
+      m.renderOrder = 5;
+      scene.add(m);
+      return { x: +m.position.x.toFixed(2), y: +m.position.y.toFixed(2), z: +m.position.z.toFixed(2), dist: +hit.distance.toFixed(2) };
+    },
+  };
 
   // Debug hook for building the piece (position + view); harmless in the final file.
   window.__room = {
