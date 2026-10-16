@@ -3521,7 +3521,7 @@ D1pp6049aaetAxh60UHrRQWFFFFACg4pyt6UynLQNEqHFShge2KiXpUkfWgosxx71zSSQ+1SW8uzjHFT
   if (VR) {
     stage.classList.add('clean', 'cardboard');
     const tip = document.createElement('div'); tip.className = 'gate-sub mono'; tip.style.marginTop = '18px';
-    tip.textContent = 'Cardboard: phone sideways, tap Enter, put it in the viewer. Walk on the spot to go forward, where you look. Look down at your feet for a moment: UV lamp on / off.';
+    tip.textContent = 'Cardboard: phone sideways, tap Enter, put it in the viewer. You walk by yourself, just look around. Look down at your feet for a moment: UV lamp on / off.';
     enterBtn.insertAdjacentElement('afterend', tip);
     addEventListener('deviceorientation', (e) => { if (e.alpha != null) vrOri = e; });
     enterBtn.addEventListener('click', () => {
@@ -3564,8 +3564,8 @@ D1pp6049aaetAxh60UHrRQWFFFFACg4pyt6UynLQNEqHFShge2KiXpUkfWgosxx71zSSQ+1SW8uzjHFT
   }
   // walking on the spot: every step bobs the head, the phone feels it (the up-down part
   // of its acceleration) and you take one stride in the direction you are looking.
-  // (?vr&auto: walked for you along the lane instead)
-  const VR_AUTO = new URLSearchParams(location.search).has('auto');
+  // Only with ?vr&steps (it was not reliable enough); by default you are walked along the lane.
+  const VR_AUTO = !new URLSearchParams(location.search).has('steps');
   const vrG = new THREE.Vector3(0, -9.81, 0), vrAcc = new THREE.Vector3();
   let vrV = 0, vrVPrev = 0, vrLastStep = 0, vrMove = 0, vrMoveDir = [0, 0];
   addEventListener('devicemotion', (e) => {
