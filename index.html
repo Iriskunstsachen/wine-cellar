@@ -3463,6 +3463,7 @@ D1pp6049aaetAxh60UHrRQWFFFFACg4pyt6UynLQNEqHFShge2KiXpUkfWgosxx71zSSQ+1SW8uzjHFT
   // gyroscope), the lamp shines where you look. Walking is done for you: slowly
   // along a free lane through the room, with pauses, there and back again.
   const VR = /[?&]vr\b/.test(location.search);
+  const VR_IPD = +(new URLSearchParams(location.search).get('ipd') || 62); // mm between the lenses
   const vrQ = new THREE.Quaternion(), vrOff = new THREE.Quaternion();
   let vrOri = null, vrRef = null, vrT = 0;
   const VR_PATH = [[1.55, -0.06], [0.76, 0.09], [0.80, 0.81], [0.06, 0.94]];
@@ -3530,12 +3531,16 @@ D1pp6049aaetAxh60UHrRQWFFFFACg4pyt6UynLQNEqHFShge2KiXpUkfWgosxx71zSSQ+1SW8uzjHFT
     vrRight.set(1, 0, 0).applyQuaternion(camera.quaternion);
     camera.aspect = hw / h; camera.updateProjectionMatrix();
     renderer.setScissorTest(true);
+    // the viewer's lenses are fixed: each picture is centred under its lens, ~62 mm
+    // apart whatever the phone's size (one CSS px is ~0.165 mm on phones; ?ipd=58 to change)
+    const sep = Math.min(hw * 1.4, VR_IPD / 0.165);
     for (let eye = 0; eye < 2; eye++) {
       camera.position.copy(base).addScaledVector(vrRight, (eye ? 1 : -1) * 0.032);
       camera.updateMatrixWorld();
-      renderer.setViewport(eye * hw, 0, hw, h); renderer.setScissor(eye * hw, 0, hw, h);
+      const cx = w / 2 + (eye ? 1 : -1) * sep / 2;
+      renderer.setViewport(cx - hw / 2, 0, hw, h); renderer.setScissor(eye * hw, 0, hw, h);
       // the lamp: where you look, a little below the middle (held at the chest)
-      shared.uLightPos.value.set((eye * hw + hw / 2) * dpr, h * 0.44 * dpr);
+      shared.uLightPos.value.set(cx * dpr, h * 0.44 * dpr);
       renderer.render(scene, camera);
     }
     renderer.setScissorTest(false);
