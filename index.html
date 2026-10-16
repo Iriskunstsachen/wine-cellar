@@ -2779,13 +2779,25 @@ D1pp6049aaetAxh60UHrRQWFFFFACg4pyt6UynLQNEqHFShge2KiXpUkfWgosxx71zSSQ+1SW8uzjHFT
     uniform float uBoost; // high beam: 0 = normal, 1 = high
     uniform float uAmbK;  // how much of the room shows outside the beam (1 = as in the piece)
     uniform float uUV;    // UV lamp (video only): 0 = flashlight, 1 = UV
+    uniform float uSpotOn;  // cardboard: a real lamp in the hand (world space) instead of a circle on the screen
+    uniform vec3 uSpotPos, uSpotDir;
+    uniform float uSpotAng; // the cone's half angle (rad) that matches uBeamRadius
+    vec3 gWorld;            // the surface point being shaded (set by the shader's main)
     vec3 shade(vec3 tex, vec3 n){
       tex = tex * 0.86 + vec3(0.08);
-      float d = distance(gl_FragCoord.xy, uLightPos);
+      float d = distance(gl_FragCoord.xy, uLightPos), fall = 1.0;
+      if (uSpotOn > 0.5) {
+        // the cone from the hand: its angle off the lamp's axis, brighter close by,
+        // weaker far away, and surfaces turned away from the lamp get less
+        vec3 L = uSpotPos - gWorld; float dist = max(length(L), 0.05); vec3 l = L / dist;
+        d = acos(clamp(dot(-l, uSpotDir), -1.0, 1.0)) / uSpotAng * uBeamRadius;
+        fall = clamp(6.0 / (0.6 + dist * dist), 0.0, 4.0) * (0.35 + 0.65 * max(dot(n, l), 0.0));
+      }
       float outer = 1.0 - smoothstep(uBeamRadius * 0.12, uBeamRadius * 1.12, d);
       float mid = 1.0 - smoothstep(uBeamRadius * 0.00, uBeamRadius * 0.60, d);
       float hot = 1.0 - smoothstep(0.0, uBeamRadius * 0.18, d);
       float beam = (outer * 0.34 + mid * 0.50 + hot * 0.12) * 0.68 * uPower * (1.0 + 2.0 * uBoost);
+      beam *= fall;
       vec3 L = normalize(vec3(0.18, 0.94, 0.10));
       float diff = max(dot(n, L), 0.0);
       float ambient = 0.022 + 0.02 * diff;
@@ -2831,6 +2843,7 @@ D1pp6049aaetAxh60UHrRQWFFFFACg4pyt6UynLQNEqHFShge2KiXpUkfWgosxx71zSSQ+1SW8uzjHFT
     uniform float uInkOn;
     ${LIGHT}
     void main(){
+      gWorld = vWorld;
       // where the scan ends, the surface frays out (ragged, not a clean cut)
       float cell = fract(sin(dot(floor(vWorld * 400.0), vec3(12.9898, 78.233, 37.719))) * 43758.5453);
       float wob = fract(sin(dot(floor(vWorld * 9.0), vec3(39.3, 11.7, 83.1))) * 43758.5453) - 0.5;
@@ -2870,7 +2883,9 @@ D1pp6049aaetAxh60UHrRQWFFFFACg4pyt6UynLQNEqHFShge2KiXpUkfWgosxx71zSSQ+1SW8uzjHFT
     uniform vec2 uLightPos;
     varying vec3 vWorldNormal;
     varying vec2 vUv;
+    varying vec3 vWorldP;
     void main(){
+      vWorldP = (modelMatrix * vec4(position, 1.0)).xyz;
       vec4 mv = modelViewMatrix * vec4(position, 1.0);
       gl_Position = projectionMatrix * mv;
       vec2 sp = (gl_Position.xy / gl_Position.w * 0.5 + 0.5) * uRes;
@@ -2882,6 +2897,7 @@ D1pp6049aaetAxh60UHrRQWFFFFACg4pyt6UynLQNEqHFShge2KiXpUkfWgosxx71zSSQ+1SW8uzjHFT
   const POINTS_FS = `
     varying vec3 vWorldNormal;
     varying vec2 vUv;
+    varying vec3 vWorldP;
     uniform sampler2D uMap;
     uniform float uHasMap;
     uniform vec3 uColor;
@@ -2889,6 +2905,7 @@ D1pp6049aaetAxh60UHrRQWFFFFACg4pyt6UynLQNEqHFShge2KiXpUkfWgosxx71zSSQ+1SW8uzjHFT
     void main(){
       vec2 c = gl_PointCoord - 0.5;
       if (dot(c, c) > 0.25) discard;
+      gWorld = vWorldP;
       vec3 tex = uHasMap > 0.5 ? texture2D(uMap, vUv).rgb * uColor : uColor;
       gl_FragColor = vec4(shade(tex, normalize(vWorldNormal)), 1.0);
     }`;
@@ -2906,6 +2923,7 @@ D1pp6049aaetAxh60UHrRQWFFFFACg4pyt6UynLQNEqHFShge2KiXpUkfWgosxx71zSSQ+1SW8uzjHFT
     uInkMat: { value: new THREE.Matrix4() },
     uInkOn: { value: 0 },
     uPtMax: { value: 3.5 }, // largest point, in device px
+    uSpotOn: { value: 0 }, uSpotPos: { value: new THREE.Vector3() }, uSpotDir: { value: new THREE.Vector3(0, 0, -1) }, uSpotAng: { value: 0.4 },
   };
 
   function flashlightMaterial(src) {
@@ -2936,6 +2954,7 @@ D1pp6049aaetAxh60UHrRQWFFFFACg4pyt6UynLQNEqHFShge2KiXpUkfWgosxx71zSSQ+1SW8uzjHFT
         uBeamRadius: shared.uBeamRadius, uLightPos: shared.uLightPos,
         uPower: shared.uPower, uBoost: shared.uBoost, uAmbK: shared.uAmbK, uUV: shared.uUV,
         uInkTex: shared.uInkTex, uInkMat: shared.uInkMat, uInkOn: shared.uInkOn,
+        uSpotOn: shared.uSpotOn, uSpotPos: shared.uSpotPos, uSpotDir: shared.uSpotDir, uSpotAng: shared.uSpotAng,
       },
     });
   }
@@ -2949,6 +2968,7 @@ D1pp6049aaetAxh60UHrRQWFFFFACg4pyt6UynLQNEqHFShge2KiXpUkfWgosxx71zSSQ+1SW8uzjHFT
         uAmbient: { value: 0.3 },
         uBeamRadius: shared.uBeamRadius, uLightPos: shared.uLightPos,
         uPower: shared.uPower, uBoost: shared.uBoost, uAmbK: shared.uAmbK, uUV: shared.uUV,
+        uSpotOn: shared.uSpotOn, uSpotPos: shared.uSpotPos, uSpotDir: shared.uSpotDir, uSpotAng: shared.uSpotAng,
       },
     });
   }
@@ -3382,7 +3402,13 @@ D1pp6049aaetAxh60UHrRQWFFFFACg4pyt6UynLQNEqHFShge2KiXpUkfWgosxx71zSSQ+1SW8uzjHFT
   function scheduleEvent() {
     const h = lamp.health, r = Math.random();
     let s;
-    if (h < 0.12 && r < 0.6) {
+    if (VR && h > 0.12 && r < 0.3) {
+      // cardboard: now and then the lamp simply dies for a few seconds, then sputters back
+      s = [...stutter(Math.floor(rnd(1, 3))), { v: rnd(0.2, 0.4), d: rnd(0.3, 0.9), tau: 0.25 },
+           { v: 0, d: rnd(2.5, 6), tau: 0.08, snap: true, out: true },
+           { v: 0.2, d: rnd(0.05, 0.1), tau: 0.03, snap: true }, { v: 0, d: rnd(0.3, 0.9), tau: 0.05, snap: true },
+           ...stutter(Math.floor(rnd(2, 5)))];
+    } else if (h < 0.12 && r < 0.6) {
       // battery nearly flat: dims, stutters, goes out; later sputters back
       s = [{ v: rnd(0.3, 0.5), d: rnd(1, 2.5), tau: 0.5 }, ...stutter(Math.floor(rnd(2, 4))),
            { v: 0, d: rnd(3, 9), tau: 0.12, snap: true, out: true },
@@ -3402,7 +3428,7 @@ D1pp6049aaetAxh60UHrRQWFFFFACg4pyt6UynLQNEqHFShge2KiXpUkfWgosxx71zSSQ+1SW8uzjHFT
     lamp.script = s;
   }
   function battery(dt) {
-    if (!entered) return 1;
+    if (!entered || (VR && vrCal)) return 1; // cardboard: the lamp only starts acting up once you are in the room
     lamp.time += dt;
     if (!highBeam) {
       // normal beam: any stutter stops, the light settles, the battery recovers
@@ -3579,6 +3605,51 @@ D1pp6049aaetAxh60UHrRQWFFFFACg4pyt6UynLQNEqHFShge2KiXpUkfWgosxx71zSSQ+1SW8uzjHFT
       try { localStorage.setItem('cellarVrSep', String(Math.round(vrSep))); } catch (e) {}
     }
   }
+  // the lamp in the right hand, at chest height: it aims at what you look at, a little
+  // late (a hand follows the eyes), with a slight tremor and the swing of the steps
+  const vrLampDir = new THREE.Vector3(0, 0, -1), vrLampPos = new THREE.Vector3(), vrAim = new THREE.Vector3();
+  let vrHandT = 0;
+  function vrHand(dt, eye, look) {
+    vrHandT += dt;
+    const yaw = Math.atan2(look.x, -look.z), rx = Math.cos(yaw), rz = Math.sin(yaw), fx = Math.sin(yaw), fz = -Math.cos(yaw);
+    const swing = Math.sin(bobPhase) * 0.02 * bobAmp;
+    vrLampPos.set(eye.x + rx * (0.17 + swing) + fx * 0.22, eye.y - 0.36 + Math.abs(Math.cos(bobPhase)) * 0.01 * bobAmp, eye.z + rz * (0.17 + swing) + fz * 0.22);
+    rayOrigin.copy(eye); rayDir.copy(look);
+    const hit = Math.min(firstHit(12), 8);
+    vrAim.copy(eye).addScaledVector(look, hit < Infinity ? hit : 4).sub(vrLampPos).normalize();
+    // tremor: small, slow and a little faster, never quite still
+    const t = vrHandT, up = new THREE.Vector3(0, 1, 0), side = new THREE.Vector3(rx, 0, rz);
+    vrAim.addScaledVector(side, Math.sin(t * 1.7) * 0.012 + Math.sin(t * 5.3 + 1) * 0.004 + Math.sin(t * 0.43 + 2) * 0.02)
+         .addScaledVector(up, Math.sin(t * 1.3 + 0.7) * 0.01 + Math.sin(t * 4.1) * 0.004 + Math.sin(t * 0.37 + 4) * 0.015 + swing * 0.4).normalize();
+    vrLampDir.lerp(vrAim, 1 - Math.exp(-dt * 6.5)).normalize();
+    shared.uSpotOn.value = 1; shared.uSpotPos.value.copy(vrLampPos); shared.uSpotDir.value.copy(vrLampDir);
+    if (!vrHaze) vrHaze = makeHaze();
+    vrHaze.position.copy(vrLampPos); vrHaze.lookAt(vrLampPos.clone().add(vrLampDir));
+    vrHaze.scale.z = Math.min(hit, 6) / 3; // the shaft ends where the light lands
+  }
+  // the beam seen in the dusty air: a faint cone from the lamp, brightest near the lamp,
+  // soft at its sides, fading out along its length (and flickering with the lamp)
+  let vrHaze = null;
+  function makeHaze() {
+    const H = 3, geo = new THREE.ConeGeometry(Math.tan(shared.uSpotAng.value * 0.8) * H, H, 48, 1, true);
+    geo.translate(0, -H / 2, 0); geo.rotateX(-Math.PI / 2); // apex at the lamp, opening along +z
+    const m = new THREE.Mesh(geo, new THREE.ShaderMaterial({
+      transparent: true, depthWrite: false, side: THREE.DoubleSide, blending: THREE.AdditiveBlending,
+      vertexShader: `varying float vT; varying vec3 vN; varying vec3 vV;
+        void main(){ vT = position.z / 3.0; vec4 mv = modelViewMatrix * vec4(position, 1.0); vV = -mv.xyz; vN = normalMatrix * normal; gl_Position = projectionMatrix * mv; }`,
+      fragmentShader: `varying float vT; varying vec3 vN; varying vec3 vV; uniform float uPower, uUV;
+        void main(){
+          float side = pow(abs(dot(normalize(vN), normalize(vV))), 2.0);
+          float a = 0.065 * pow(1.0 - clamp(vT, 0.0, 1.0), 1.6) * side * uPower;
+          vec3 c = mix(vec3(1.0, 0.95, 0.85), vec3(0.45, 0.3, 1.0), uUV);
+          gl_FragColor = vec4(c * a, 1.0);
+        }`,
+      uniforms: { uPower: shared.uPower, uUV: shared.uUV },
+    }));
+    m.renderOrder = 10; m.frustumCulled = false;
+    scene.add(m);
+    return m;
+  }
   const vrRight = new THREE.Vector3();
   function vrRender(dt) {
     const w = canvas.clientWidth, h = canvas.clientHeight, hw = w / 2;
@@ -3589,6 +3660,7 @@ D1pp6049aaetAxh60UHrRQWFFFFACg4pyt6UynLQNEqHFShge2KiXpUkfWgosxx71zSSQ+1SW8uzjHFT
     cam.yaw = Math.atan2(f.x, -f.z); cam.pitch = Math.asin(clamp(f.y, -1, 1));
     const base = camera.position.clone();
     vrRight.set(1, 0, 0).applyQuaternion(camera.quaternion);
+    vrHand(dt, base, f);
     camera.aspect = hw / h; camera.updateProjectionMatrix();
     renderer.setScissorTest(true);
     // the viewer's lenses are fixed: each picture is centred under its lens, ~62 mm
