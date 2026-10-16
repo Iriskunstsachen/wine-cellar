@@ -3464,6 +3464,7 @@ D1pp6049aaetAxh60UHrRQWFFFFACg4pyt6UynLQNEqHFShge2KiXpUkfWgosxx71zSSQ+1SW8uzjHFT
   // along a free lane through the room, with pauses, there and back again.
   const VR = /[?&]vr\b/.test(location.search);
   const VR_IPD = +(new URLSearchParams(location.search).get('ipd') || 62); // mm between the lenses
+  const VR_EYE = new URLSearchParams(location.search).has('flat') ? 0 : 0.032; // ?flat: the same picture for both eyes (no depth)
   const vrQ = new THREE.Quaternion(), vrOff = new THREE.Quaternion();
   let vrOri = null, vrRef = null, vrT = 0;
   const VR_PATH = [[1.55, -0.06], [0.76, 0.09], [0.80, 0.81], [0.06, 0.94]];
@@ -3535,7 +3536,7 @@ D1pp6049aaetAxh60UHrRQWFFFFACg4pyt6UynLQNEqHFShge2KiXpUkfWgosxx71zSSQ+1SW8uzjHFT
     // apart whatever the phone's size (one CSS px is ~0.165 mm on phones; ?ipd=58 to change)
     const sep = Math.min(hw * 1.4, VR_IPD / 0.165);
     for (let eye = 0; eye < 2; eye++) {
-      camera.position.copy(base).addScaledVector(vrRight, (eye ? 1 : -1) * 0.032);
+      camera.position.copy(base).addScaledVector(vrRight, (eye ? 1 : -1) * VR_EYE);
       camera.updateMatrixWorld();
       const cx = w / 2 + (eye ? 1 : -1) * sep / 2;
       renderer.setViewport(cx - hw / 2, 0, hw, h); renderer.setScissor(eye * hw, 0, hw, h);
