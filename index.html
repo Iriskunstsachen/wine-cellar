@@ -3521,9 +3521,48 @@ D1pp6049aaetAxh60UHrRQWFFFFACg4pyt6UynLQNEqHFShge2KiXpUkfWgosxx71zSSQ+1SW8uzjHFT
     if (vrT < 0.1) { cam.x = tx; cam.z = tz; lastX = tx; lastZ = tz; return; }
     if (Math.hypot(tx - cam.x, tz - cam.z) > 0.001) { moveBy(tx - cam.x, tz - cam.z); lastWheel = now; }
   }
+  // calibration, with the head (there are no buttons): two crosses, one per eye; tilting
+  // the head sideways moves them apart / together; holding still for 3 s keeps the
+  // distance (remembered on this phone) and the room appears.
+  let vrSep = null, vrCal = VR, vrCalHold = 0, vrCalOv = null, vrCalT = 0;
+  try { const v = +localStorage.getItem('cellarVrSep'); if (v > 0) vrSep = v; } catch (e) {}
+  if (new URLSearchParams(location.search).has('ipd')) vrSep = VR_IPD / 0.165;
+  function vrCalibrate(dt, w, h) {
+    if (!vrCalOv) {
+      vrCalOv = document.createElement('canvas');
+      vrCalOv.style.cssText = 'position:fixed;inset:0;width:100%;height:100%;z-index:30;background:#000';
+      document.body.appendChild(vrCalOv);
+    }
+    const c = vrCalOv; if (c.width !== Math.round(w * dpr)) { c.width = Math.round(w * dpr); c.height = Math.round(h * dpr); }
+    if (vrSep == null) vrSep = Math.min(w / 2 * 1.4, 62 / 0.165);
+    const q = vrHead(), r = q ? new THREE.Vector3(1, 0, 0).applyQuaternion(q).y : 0; // head tilt: + = right ear down
+    const tilt = Math.abs(r) > 0.07 ? r - Math.sign(r) * 0.07 : 0;
+    vrSep = clamp(vrSep + tilt * 260 * dt, w * 0.15, w * 0.85);
+    vrCalT += dt; // the first 8 s: time to put the phone into the viewer
+    vrCalHold = tilt || vrCalT < 8 ? 0 : vrCalHold + dt;
+    const g = c.getContext('2d'); g.setTransform(dpr, 0, 0, dpr, 0, 0);
+    g.fillStyle = '#000'; g.fillRect(0, 0, w, h);
+    for (let eye = 0; eye < 2; eye++) {
+      const cx = w / 2 + (eye ? 1 : -1) * vrSep / 2, cy = h * 0.5;
+      g.save(); g.beginPath(); g.rect(eye * w / 2, 0, w / 2, h); g.clip();
+      g.strokeStyle = '#f2ead8'; g.lineWidth = 2;
+      g.beginPath(); g.arc(cx, cy, 34, 0, Math.PI * 2); g.moveTo(cx - 50, cy); g.lineTo(cx + 50, cy); g.moveTo(cx, cy - 50); g.lineTo(cx, cy + 50); g.stroke();
+      // holding still: a ring fills up
+      g.lineWidth = 4; g.beginPath(); g.arc(cx, cy, 44, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * Math.min(1, vrCalHold / 4)); g.stroke();
+      g.fillStyle = 'rgba(242,234,216,.75)'; g.font = '12px Arial'; g.textAlign = 'center';
+      g.fillText('tilt your head until you see one cross', cx, cy + 82);
+      g.fillText('then keep still', cx, cy + 98);
+      g.restore();
+    }
+    if (vrCalHold >= 4) {
+      vrCal = false; c.remove(); vrCalOv = null;
+      try { localStorage.setItem('cellarVrSep', String(Math.round(vrSep))); } catch (e) {}
+    }
+  }
   const vrRight = new THREE.Vector3();
-  function vrRender() {
+  function vrRender(dt) {
     const w = canvas.clientWidth, h = canvas.clientHeight, hw = w / 2;
+    if (vrCal) { vrCalibrate(dt, w, h); return; }
     const q = vrHead();
     if (q) camera.quaternion.copy(q);
     const f = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
@@ -3534,7 +3573,7 @@ D1pp6049aaetAxh60UHrRQWFFFFACg4pyt6UynLQNEqHFShge2KiXpUkfWgosxx71zSSQ+1SW8uzjHFT
     renderer.setScissorTest(true);
     // the viewer's lenses are fixed: each picture is centred under its lens, ~62 mm
     // apart whatever the phone's size (one CSS px is ~0.165 mm on phones; ?ipd=58 to change)
-    const sep = Math.min(hw * 1.4, VR_IPD / 0.165);
+    const sep = vrSep ?? Math.min(hw * 1.4, VR_IPD / 0.165);
     for (let eye = 0; eye < 2; eye++) {
       camera.position.copy(base).addScaledVector(vrRight, (eye ? 1 : -1) * VR_EYE);
       camera.updateMatrixWorld();
@@ -3570,7 +3609,7 @@ D1pp6049aaetAxh60UHrRQWFFFFACg4pyt6UynLQNEqHFShge2KiXpUkfWgosxx71zSSQ+1SW8uzjHFT
   // standing still, the first step comes at once.
   let stride = 0, lastWalkT = -1e9;
   function tick(dt, now, powerOverride) {
-    if (VR && entered && !recording) vrStep(dt, now);
+    if (VR && entered && !recording && !vrCal) vrStep(dt, now);
     update(dt);
     const moved = Math.hypot(cam.x - lastX, cam.z - lastZ);
     const walking = Object.values(state.keys).some(Boolean) || now - lastWheel < 250;
@@ -3600,7 +3639,7 @@ D1pp6049aaetAxh60UHrRQWFFFFACg4pyt6UynLQNEqHFShge2KiXpUkfWgosxx71zSSQ+1SW8uzjHFT
     camera.position.set(cam.x + Math.cos(cam.yaw) * sway - Math.sin(cam.yaw) * jolt * 0.05, cam.y + bobY - jolt * 0.012, cam.z + Math.sin(cam.yaw) * sway + Math.cos(cam.yaw) * jolt * 0.05);
     camera.rotation.y = -cam.yaw;
     camera.rotation.x = cam.pitch - jolt * 0.03;
-    if (VR && entered && !recording) vrRender();
+    if (VR && entered && !recording) vrRender(dt);
     else renderer.render(scene, topCam || camera);
     return { moved, power };
   }
