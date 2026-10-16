@@ -2766,7 +2766,7 @@ D1pp6049aaetAxh60UHrRQWFFFFACg4pyt6UynLQNEqHFShge2KiXpUkfWgosxx71zSSQ+1SW8uzjHFT
   // Laptop/desktop: solid only inside the beam, fine points elsewhere.
   // Phones/tablets: the plain solid scan (lighter on the GPU).
   const MOBILE = matchMedia('(pointer: coarse)').matches;
-  const RENDER = MOBILE || /[?&]mesh\b/.test(location.search) ? 'mesh' : 'mix';
+  const RENDER = MOBILE || /[?&](mesh|vr)\b/.test(location.search) ? 'mesh' : 'mix';
 
   // ---------- shaders (flashlight) ----------
   const LIGHT = `
@@ -2861,6 +2861,7 @@ D1pp6049aaetAxh60UHrRQWFFFFACg4pyt6UynLQNEqHFShge2KiXpUkfWgosxx71zSSQ+1SW8uzjHFT
     }`;
   const POINTS_VS = `
     uniform float uSize;
+    uniform float uPtMax;
     uniform float uScale;
     uniform vec2 uRes;
     uniform float uBeamRadius;
@@ -2872,7 +2873,7 @@ D1pp6049aaetAxh60UHrRQWFFFFACg4pyt6UynLQNEqHFShge2KiXpUkfWgosxx71zSSQ+1SW8uzjHFT
       gl_Position = projectionMatrix * mv;
       vec2 sp = (gl_Position.xy / gl_Position.w * 0.5 + 0.5) * uRes;
       float inBeam = 1.0 - smoothstep(uBeamRadius * 0.3, uBeamRadius * 1.05, distance(sp, uLightPos));
-      gl_PointSize = clamp(uSize * uScale / -mv.z, 1.0, 3.5) * mix(0.6, 1.0, inBeam);
+      gl_PointSize = clamp(uSize * uScale / -mv.z, 1.0, uPtMax) * mix(0.6, 1.0, inBeam);
       vWorldNormal = mat3(modelMatrix) * normal;
       vUv = uv;
     }`;
@@ -2902,6 +2903,7 @@ D1pp6049aaetAxh60UHrRQWFFFFACg4pyt6UynLQNEqHFShge2KiXpUkfWgosxx71zSSQ+1SW8uzjHFT
     uInkTex: { value: null },
     uInkMat: { value: new THREE.Matrix4() },
     uInkOn: { value: 0 },
+    uPtMax: { value: 3.5 }, // largest point, in device px
   };
 
   function flashlightMaterial(src) {
@@ -2941,22 +2943,21 @@ D1pp6049aaetAxh60UHrRQWFFFFACg4pyt6UynLQNEqHFShge2KiXpUkfWgosxx71zSSQ+1SW8uzjHFT
       vertexShader: POINTS_VS, fragmentShader: POINTS_FS,
       uniforms: {
         uMap: u.uMap, uHasMap: u.uHasMap, uColor: u.uColor,
-        uSize: { value: size }, uScale: shared.uScale, uRes: shared.uRes,
+        uSize: { value: size }, uScale: shared.uScale, uPtMax: shared.uPtMax, uRes: shared.uRes,
         uAmbient: { value: 0.3 },
         uBeamRadius: shared.uBeamRadius, uLightPos: shared.uLightPos,
         uPower: shared.uPower, uBoost: shared.uBoost, uAmbK: shared.uAmbK, uUV: shared.uUV,
       },
     });
   }
-  function buildPointCloud(meshes) {
-    const total = 1000000;
+  function buildPointCloud(meshes, total = 1000000, grow = 1) {
     const items = meshes.map((m) => {
       const sampler = new MeshSurfaceSampler(m).build();
       const sc = m.matrixWorld.getMaxScaleOnAxis();
       return { m, sampler, area: sampler.distribution[sampler.distribution.length - 1] * sc * sc };
     });
     const areaSum = items.reduce((a, it) => a + it.area, 0) || 1;
-    const size = Math.sqrt(areaSum / total) * 0.9;
+    const size = Math.sqrt(areaSum / total) * 0.9 * grow;
     const p = new THREE.Vector3(), n = new THREE.Vector3(), uv = new THREE.Vector2();
     let count = 0;
     for (const { m, sampler, area } of items) {
@@ -3029,6 +3030,7 @@ D1pp6049aaetAxh60UHrRQWFFFFACg4pyt6UynLQNEqHFShge2KiXpUkfWgosxx71zSSQ+1SW8uzjHFT
     shared.uScale.value = (r.height * dpr) / (2 * Math.tan(THREE.MathUtils.degToRad(camera.fov) / 2));
     shared.uRes.value.set(r.width * dpr, r.height * dpr);
     beamRadiusPx = Math.min(r.width, r.height) * (r.width > 900 ? (MOBILE ? 0.34 : 0.40) : 0.44);
+    if (/[?&]vr\b/.test(location.search)) beamRadiusPx = Math.min(r.width / 2, r.height) * 0.42; // cardboard: one picture per eye
     applyBeamSize();
     if (!pointer.active) { pointer.x = r.width * 0.58; pointer.y = r.height * 0.42; }
     else { pointer.x = clamp(pointer.x, 0, r.width); pointer.y = clamp(pointer.y, 0, r.height); }
@@ -3047,6 +3049,7 @@ D1pp6049aaetAxh60UHrRQWFFFFACg4pyt6UynLQNEqHFShge2KiXpUkfWgosxx71zSSQ+1SW8uzjHFT
 
   // ---------- input ----------
   canvas.addEventListener('pointerdown', (e) => {
+    if (VR) return; // cardboard: the head looks, there is nothing to touch
     state.dragging = true;
     state.dragId = e.pointerId;
     state.lastX = e.clientX;
@@ -3316,7 +3319,7 @@ D1pp6049aaetAxh60UHrRQWFFFFACg4pyt6UynLQNEqHFShge2KiXpUkfWgosxx71zSSQ+1SW8uzjHFT
       const pts = new THREE.Points(g, pointsMaterial(m.material, 0.0035));
       pts.matrixAutoUpdate = false;
       pts.matrix.copy(m.matrixWorld);
-      scene.add(pts);
+      pts.userData.edge = true; scene.add(pts);
     });
     window.__edgeStats = { open: open.length, points: perMesh.reduce((s, o) => s + o.pos.length / 3, 0) };
   }
@@ -3455,6 +3458,90 @@ D1pp6049aaetAxh60UHrRQWFFFFACg4pyt6UynLQNEqHFShge2KiXpUkfWgosxx71zSSQ+1SW8uzjHFT
   beamBtn.addEventListener('click', () => setHighBeam(!highBeam));
   addEventListener('keydown', (e) => { if (e.key.toLowerCase() === 'l' && !e.metaKey && !e.ctrlKey && !e.repeat) setHighBeam(!highBeam); });
 
+  // ---------- cardboard (?vr): a phone in a cardboard viewer, no buttons ----------
+  // Two pictures side by side (one per eye), the head turns the view (phone
+  // gyroscope), the lamp shines where you look. Walking is done for you: slowly
+  // along a free lane through the room, with pauses, there and back again.
+  const VR = /[?&]vr\b/.test(location.search);
+  const vrQ = new THREE.Quaternion(), vrOff = new THREE.Quaternion();
+  let vrOri = null, vrRef = null, vrT = 0;
+  const VR_PATH = [[1.55, -0.06], [0.76, 0.09], [0.80, 0.81], [0.06, 0.94]];
+  const vrLen = VR_PATH.slice(1).reduce((a, p, i) => a + Math.hypot(p[0] - VR_PATH[i][0], p[1] - VR_PATH[i][1]), 0);
+  function vrAt(d) { // a point d metres along the lane
+    for (let i = 1; i < VR_PATH.length; i++) {
+      const [ax, az] = VR_PATH[i - 1], [bx, bz] = VR_PATH[i], l = Math.hypot(bx - ax, bz - az);
+      if (d <= l || i === VR_PATH.length - 1) { const k = clamp(d / l, 0, 1); return [ax + (bx - ax) * k, az + (bz - az) * k]; }
+      d -= l;
+    }
+  }
+  function vrDistance(t) { // 0.3 m/s, 5 s pause at each end and 2.5 s at each corner
+    const speed = 0.3, cornerPause = 2.5, endPause = 5;
+    const segs = VR_PATH.slice(1).map((p, i) => Math.hypot(p[0] - VR_PATH[i][0], p[1] - VR_PATH[i][1]));
+    const plan = []; // [duration, from d, to d]
+    let d = 0;
+    plan.push([endPause, 0, 0]);
+    segs.forEach((l, i) => { plan.push([l / speed, d, d + l]); d += l; if (i < segs.length - 1) plan.push([cornerPause, d, d]); });
+    plan.push([endPause, d, d]);
+    for (let i = segs.length - 1; i >= 0; i--) { plan.push([segs[i] / speed, d, d - segs[i]]); d -= segs[i]; if (i > 0) plan.push([cornerPause, d, d]); }
+    const total = plan.reduce((a, p) => a + p[0], 0);
+    let u = t % total;
+    for (const [dur, a, b] of plan) { if (u <= dur) { const k = dur ? u / dur : 1, e = k * k * (3 - 2 * k); return a + (b - a) * e; } u -= dur; }
+    return 0;
+  }
+  if (VR) {
+    stage.classList.add('clean', 'cardboard');
+    const tip = document.createElement('div'); tip.className = 'gate-sub mono'; tip.style.marginTop = '18px';
+    tip.textContent = 'Cardboard: phone sideways, tap Enter, put it in the viewer. You walk by yourself, just look around.';
+    enterBtn.insertAdjacentElement('afterend', tip);
+    addEventListener('deviceorientation', (e) => { if (e.alpha != null) vrOri = e; });
+    enterBtn.addEventListener('click', () => {
+      try { if (window.DeviceOrientationEvent && DeviceOrientationEvent.requestPermission) DeviceOrientationEvent.requestPermission(); } catch (err) {}
+      try { document.documentElement.requestFullscreen && document.documentElement.requestFullscreen().then(() => screen.orientation && screen.orientation.lock && screen.orientation.lock('landscape').catch(() => {})).catch(() => {}); } catch (err) {}
+      try { navigator.wakeLock && navigator.wakeLock.request('screen').catch(() => {}); } catch (err) {}
+    });
+    camera.fov = 80; camera.updateProjectionMatrix();
+  }
+  const vrEuler = new THREE.Euler(), vrQ1 = new THREE.Quaternion(-Math.sqrt(0.5), 0, 0, Math.sqrt(0.5)), vrQ0 = new THREE.Quaternion(), ZEE = new THREE.Vector3(0, 0, 1);
+  function vrHead() { // phone orientation -> camera orientation (as three's DeviceOrientationControls)
+    if (!vrOri) return null;
+    const rad = Math.PI / 180, orient = ((screen.orientation && screen.orientation.angle) ?? window.orientation ?? 0) * rad;
+    vrEuler.set(vrOri.beta * rad, vrOri.alpha * rad, -vrOri.gamma * rad, 'YXZ');
+    vrQ.setFromEuler(vrEuler).multiply(vrQ1).multiply(vrQ0.setFromAxisAngle(ZEE, -orient));
+    if (!vrRef) { // the first reading: turn the room so you start looking at the vending machine
+      const f = new THREE.Vector3(0, 0, -1).applyQuaternion(vrQ), head = Math.atan2(f.x, -f.z);
+      vrRef = true; vrOff.setFromAxisAngle(new THREE.Vector3(0, 1, 0), -(CONFIG.start.yaw - head));
+    }
+    return vrQ.premultiply(vrOff);
+  }
+  function vrStep(dt, now) { // walk the lane (with collision, bob and steps as usual)
+    vrT += dt;
+    const [tx, tz] = vrAt(vrDistance(vrT));
+    if (vrT < 0.1) { cam.x = tx; cam.z = tz; lastX = tx; lastZ = tz; return; }
+    if (Math.hypot(tx - cam.x, tz - cam.z) > 0.001) { moveBy(tx - cam.x, tz - cam.z); lastWheel = now; }
+  }
+  const vrRight = new THREE.Vector3();
+  function vrRender() {
+    const w = canvas.clientWidth, h = canvas.clientHeight, hw = w / 2;
+    const q = vrHead();
+    if (q) camera.quaternion.copy(q);
+    const f = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
+    cam.yaw = Math.atan2(f.x, -f.z); cam.pitch = Math.asin(clamp(f.y, -1, 1));
+    const base = camera.position.clone();
+    vrRight.set(1, 0, 0).applyQuaternion(camera.quaternion);
+    camera.aspect = hw / h; camera.updateProjectionMatrix();
+    renderer.setScissorTest(true);
+    for (let eye = 0; eye < 2; eye++) {
+      camera.position.copy(base).addScaledVector(vrRight, (eye ? 1 : -1) * 0.032);
+      camera.updateMatrixWorld();
+      renderer.setViewport(eye * hw, 0, hw, h); renderer.setScissor(eye * hw, 0, hw, h);
+      // the lamp: where you look, a little below the middle (held at the chest)
+      shared.uLightPos.value.set((eye * hw + hw / 2) * dpr, h * 0.44 * dpr);
+      renderer.render(scene, camera);
+    }
+    renderer.setScissorTest(false);
+    camera.position.copy(base);
+  }
+
   // ---------- loop ----------
   let prev = performance.now();
   let bobPhase = 0, bobAmp = 0;
@@ -3477,6 +3564,7 @@ D1pp6049aaetAxh60UHrRQWFFFFACg4pyt6UynLQNEqHFShge2KiXpUkfWgosxx71zSSQ+1SW8uzjHFT
   // standing still, the first step comes at once.
   let stride = 0, lastWalkT = -1e9;
   function tick(dt, now, powerOverride) {
+    if (VR && entered && !recording) vrStep(dt, now);
     update(dt);
     const moved = Math.hypot(cam.x - lastX, cam.z - lastZ);
     const walking = Object.values(state.keys).some(Boolean) || now - lastWheel < 250;
@@ -3492,7 +3580,7 @@ D1pp6049aaetAxh60UHrRQWFFFFACg4pyt6UynLQNEqHFShge2KiXpUkfWgosxx71zSSQ+1SW8uzjHFT
     if (moved < 1) bobPhase = stride / 0.62 * Math.PI * 2;
     const bobTarget = !REDUCED_MOTION && moved > 0.002 ? 1 : 0;
     bobAmp += (bobTarget - bobAmp) * Math.min(1, dt * (bobTarget ? 4 : 2.5));
-    const bobY = -Math.cos(bobPhase) * 0.016 * bobAmp;
+    const bobY = -Math.cos(bobPhase) * (VR ? 0.005 : 0.016) * bobAmp;
     const sway = Math.sin(bobPhase / 2) * 0.008 * bobAmp;
     lastX = cam.x; lastZ = cam.z;
     const power = powerOverride != null ? powerOverride : battery(dt);
@@ -3506,7 +3594,8 @@ D1pp6049aaetAxh60UHrRQWFFFFACg4pyt6UynLQNEqHFShge2KiXpUkfWgosxx71zSSQ+1SW8uzjHFT
     camera.position.set(cam.x + Math.cos(cam.yaw) * sway - Math.sin(cam.yaw) * jolt * 0.05, cam.y + bobY - jolt * 0.012, cam.z + Math.sin(cam.yaw) * sway + Math.cos(cam.yaw) * jolt * 0.05);
     camera.rotation.y = -cam.yaw;
     camera.rotation.x = cam.pitch - jolt * 0.03;
-    renderer.render(scene, topCam || camera);
+    if (VR && entered && !recording) vrRender();
+    else renderer.render(scene, topCam || camera);
     return { moved, power };
   }
   let recording = false;
@@ -3529,6 +3618,224 @@ D1pp6049aaetAxh60UHrRQWFFFFACg4pyt6UynLQNEqHFShge2KiXpUkfWgosxx71zSSQ+1SW8uzjHFT
   // it plays the piece like a person would, through the same controls, walking,
   // collision, bob and steps, frame by frame at a fixed output size.
   window.__rec = {
+    // stills for print: the whole scan as a fine point cloud (no solid surfaces),
+    // lit by the flashlight as usual; total = number of points, ptMax = largest point (px)
+    // render only part (x, y, w, h) of a larger picture (fw × fh): for prints bigger than the GPU allows
+    viewOffset(fw, fh, x, y, w, h) {
+      camera.setViewOffset(fw, fh, x, y, w, h);
+      shared.uScale.value = fh / (2 * Math.tan(THREE.MathUtils.degToRad(camera.fov) / 2));
+      beamRadiusPx = Math.min(fw, fh) * 0.44; applyBeamSize();
+      return beamRadiusPx;
+    },
+    // a found object (photo cut out from its white background) standing in the room at
+    // `at` (its foot), `height` metres tall, turned to the camera; lit by the flashlight
+    // like the scan, and (as the scan in the laptop look) solid only in the beam,
+    // breaking up into points towards the dark. A soft contact shadow under it.
+    object(img, at, height, opts = {}) {
+      const c = document.createElement('canvas'); c.width = img.width; c.height = img.height;
+      const g = c.getContext('2d'); g.drawImage(img, 0, 0);
+      const d = g.getImageData(0, 0, c.width, c.height), a = d.data, W = c.width, H = c.height;
+      // flood the white background from the edges (so white labels inside stay)
+      const seen = new Uint8Array(W * H), st = [];
+      const white = (i) => a[i * 4] > 236 && a[i * 4 + 1] > 236 && a[i * 4 + 2] > 236;
+      for (let x = 0; x < W; x++) st.push(x, (H - 1) * W + x);
+      for (let y = 0; y < H; y++) st.push(y * W, y * W + W - 1);
+      while (st.length) {
+        const i = st.pop(); if (seen[i] || !white(i)) continue; seen[i] = 1; a[i * 4 + 3] = 0;
+        const x = i % W, y = (i / W) | 0;
+        if (x > 0) st.push(i - 1); if (x < W - 1) st.push(i + 1); if (y > 0) st.push(i - W); if (y < H - 1) st.push(i + W);
+      }
+      // soften the cut edge by one pixel ring
+      for (let i = 0; i < W * H; i++) if (!seen[i] && ((i % W > 0 && seen[i - 1]) || (i % W < W - 1 && seen[i + 1]) || seen[i - W] || seen[i + W])) a[i * 4 + 3] = 140;
+      let x0 = W, x1 = 0, y0 = H, y1 = 0;
+      for (let i = 0; i < W * H; i++) if (!seen[i]) { const x = i % W, y = (i / W) | 0; if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y; }
+      g.putImageData(d, 0, 0);
+      const cw = x1 - x0 + 1, ch = y1 - y0 + 1, cc = document.createElement('canvas'); cc.width = cw; cc.height = ch;
+      cc.getContext('2d').drawImage(c, x0, y0, cw, ch, 0, 0, cw, ch);
+      const tex = new THREE.CanvasTexture(cc); tex.colorSpace = THREE.NoColorSpace; tex.anisotropy = 8; // raw, like the scan's own texture
+      const mat = new THREE.ShaderMaterial({
+        transparent: true, depthWrite: true,
+        vertexShader: `varying vec2 vUv; varying vec3 vN; void main(){ vUv = uv; vN = normalize(mat3(modelMatrix) * normal); gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
+        fragmentShader: `varying vec2 vUv; varying vec3 vN; uniform sampler2D uTex; uniform float uDither; ${LIGHT}
+          float hash(vec2 p){ return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453); }
+          void main(){
+            vec4 t = texture2D(uTex, vUv); if (t.a < 0.5) discard;
+            float inBeam = 1.0 - smoothstep(uBeamRadius * 0.3, uBeamRadius * 1.05, distance(gl_FragCoord.xy, uLightPos));
+            if (uDither > 0.5 && hash(floor(gl_FragCoord.xy / 2.0)) > mix(0.3, 1.0, inBeam)) discard;
+            gl_FragColor = vec4(shade(t.rgb, normalize(vN)), 1.0);
+          }`,
+        uniforms: { uTex: { value: tex }, uDither: { value: opts.dither ?? 1 }, uAmbient: { value: 1 },
+          uBeamRadius: shared.uBeamRadius, uLightPos: shared.uLightPos, uPower: shared.uPower, uBoost: shared.uBoost, uAmbK: shared.uAmbK, uUV: shared.uUV },
+      });
+      const w = height * cw / ch;
+      const m = new THREE.Mesh(new THREE.PlaneGeometry(w, height), mat);
+      const yaw = Math.atan2(camera.position.x - at[0], camera.position.z - at[2]) + (opts.turn || 0);
+      m.position.set(at[0], at[1] + height / 2, at[2]); m.rotation.y = yaw;
+      scene.add(m);
+      // contact shadow
+      const sc = document.createElement('canvas'); sc.width = sc.height = 128;
+      const sg = sc.getContext('2d'), gr = sg.createRadialGradient(64, 64, 0, 64, 64, 64);
+      gr.addColorStop(0, 'rgba(0,0,0,0.75)'); gr.addColorStop(0.5, 'rgba(0,0,0,0.35)'); gr.addColorStop(1, 'rgba(0,0,0,0)');
+      sg.fillStyle = gr; sg.fillRect(0, 0, 128, 128);
+      const sh = new THREE.Mesh(new THREE.PlaneGeometry(w * 1.6, w * 0.9), new THREE.MeshBasicMaterial({ map: new THREE.CanvasTexture(sc), transparent: true, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -4 }));
+      sh.rotation.x = -Math.PI / 2; sh.rotation.z = yaw; sh.position.set(at[0], at[1] + 0.004, at[2]);
+      scene.add(sh);
+      (this.objects = this.objects || []).push(m, sh);
+      return [+w.toFixed(3), cw, ch];
+    },
+    // the same found object, but as if it had been 3D-scanned where it stood: the photo's
+    // outline turned into a lathe body (wobbly, dented, a few spikes), the texture soft
+    // and smeared like a scan's, holes where the scanner missed, the foot melting into
+    // the floor, and (as the scan in the laptop look) points towards the dark.
+    scanObject(img, at, height, opts = {}) {
+      let seed = opts.seed || 1; const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
+      const c = document.createElement('canvas'); c.width = img.width; c.height = img.height;
+      const g = c.getContext('2d'); g.drawImage(img, 0, 0);
+      const d = g.getImageData(0, 0, c.width, c.height), a = d.data, W = c.width, H = c.height;
+      const seen = new Uint8Array(W * H), st = [];
+      const white = (i) => a[i * 4] > 236 && a[i * 4 + 1] > 236 && a[i * 4 + 2] > 236;
+      for (let x = 0; x < W; x++) st.push(x, (H - 1) * W + x);
+      for (let y = 0; y < H; y++) st.push(y * W, y * W + W - 1);
+      while (st.length) {
+        const i = st.pop(); if (seen[i] || !white(i)) continue; seen[i] = 1;
+        const x = i % W, y = (i / W) | 0;
+        if (x > 0) st.push(i - 1); if (x < W - 1) st.push(i + 1); if (y > 0) st.push(i - W); if (y < H - 1) st.push(i + W);
+      }
+      let x0 = W, x1 = 0, y0 = H, y1 = 0;
+      for (let i = 0; i < W * H; i++) if (!seen[i]) { const x = i % W, y = (i / W) | 0; if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y; }
+      const cw = x1 - x0 + 1, ch = y1 - y0 + 1;
+      // outline per row: left/right edge (from the bottom up)
+      const N = 56, rows = [];
+      for (let k = 0; k <= N; k++) {
+        const y = Math.min(y1, Math.round(y1 - k / N * (ch - 1)));
+        let l = -1, r = -1; for (let x = x0; x <= x1; x++) if (!seen[y * W + x]) { if (l < 0) l = x; r = x; }
+        if (l < 0) { l = r = (x0 + x1) / 2; }
+        rows.push([(l - x0) / cw, (r - x0) / cw]);
+      }
+      // the scan's texture: small and soft, colours a little smeared, bright spots
+      // (glass reflections) baked in
+      const tw = Math.max(48, Math.round(cw * (opts.texScale || 0.12))), th = Math.round(tw * ch / cw);
+      const t1 = document.createElement('canvas'); t1.width = tw; t1.height = th;
+      const tg = t1.getContext('2d'); tg.filter = 'blur(0.6px) saturate(0.85)';
+      // fill the background with the bottle's own colour first, so edges don't bleed white
+      tg.fillStyle = '#3a3a30'; tg.fillRect(0, 0, tw, th);
+      const cut = document.createElement('canvas'); cut.width = cw; cut.height = ch;
+      const cg = cut.getContext('2d'); cg.drawImage(c, x0, y0, cw, ch, 0, 0, cw, ch);
+      const cd = cg.getImageData(0, 0, cw, ch);
+      for (let y = 0; y < ch; y++) for (let x = 0; x < cw; x++) if (seen[(y + y0) * W + x + x0]) cd.data[(y * cw + x) * 4 + 3] = 0;
+      cg.putImageData(cd, 0, 0);
+      tg.drawImage(cut, 0, 0, tw, th);
+      // smear: a few horizontal streaks, as when the scanner's frames don't quite line up
+      for (let k = 0; k < (opts.smear ?? 10); k++) {
+        const sy = rnd() * th, sh = 1 + rnd() * th * 0.05, dx = (rnd() - 0.5) * tw * 0.25;
+        tg.globalAlpha = 0.7; tg.drawImage(t1, 0, sy, tw, sh, dx, sy, tw, sh); tg.globalAlpha = 1;
+      }
+      const tex = new THREE.CanvasTexture(t1); tex.colorSpace = THREE.NoColorSpace;
+      tex.minFilter = THREE.LinearFilter; tex.magFilter = THREE.LinearFilter;
+      // lathe body
+      const S = 36, pos = [], uvs = [], idx = [];
+      const wob = [rnd() * 6, rnd() * 6, rnd() * 6];
+      const spikes = new Set(); for (let k = 0; k < (opts.spikes ?? 14); k++) spikes.add(Math.floor(rnd() * (N + 1)) * (S + 1) + Math.floor(rnd() * (S + 1)));
+      const scale = height; // metres per photo height
+      for (let k = 0; k <= N; k++) {
+        const [l, r] = rows[k], cx = (l + r) / 2, hw = Math.max(0.004, (r - l) / 2);
+        let rad = hw * cw / ch * scale, y = k / N * height;
+        // the foot melts into the floor: wider, flatter
+        const foot = Math.max(0, 1 - y / (height * 0.07));
+        rad *= 1 + foot * 0.35;
+        for (let j = 0; j <= S; j++) {
+          const th2 = j / S * Math.PI * 2;
+          const n = Math.sin(th2 * 3 + wob[0] + y * 9) * 0.05 + Math.sin(th2 * 7 + wob[1] - y * 23) * 0.03 + Math.sin(y * 41 + wob[2]) * 0.03;
+          let rr = rad * (1 + n * (opts.wobble ?? 1.6));
+          if (spikes.has(k * (S + 1) + j)) rr *= 1.6 + rnd() * 1.4;
+          pos.push(Math.sin(th2) * rr, y - foot * 0.004, Math.cos(th2) * rr);
+          // front and back both show the photo (as a scan that only saw one side smears it round)
+          uvs.push(cx + Math.sin(th2) * hw, k / N);
+        }
+      }
+      for (let k = 0; k < N; k++) for (let j = 0; j < S; j++) {
+        const i0 = k * (S + 1) + j, i1 = i0 + 1, i2 = i0 + S + 1, i3 = i2 + 1;
+        idx.push(i0, i2, i1, i1, i2, i3);
+      }
+      // the top: closed with a rough cap
+      const top = pos.length / 3; pos.push(0, height * (1 - 0.004), 0); uvs.push((rows[N][0] + rows[N][1]) / 2, 1);
+      for (let j = 0; j < S; j++) idx.push(N * (S + 1) + j, top, N * (S + 1) + j + 1);
+      const geo = new THREE.BufferGeometry();
+      geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+      geo.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
+      geo.setIndex(idx); geo.computeVertexNormals();
+      const mat = new THREE.ShaderMaterial({
+        side: THREE.DoubleSide,
+        vertexShader: `varying vec2 vUv; varying vec3 vN; varying vec3 vP; void main(){ vUv = uv; vN = normalize(mat3(modelMatrix) * normal); vP = position; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
+        fragmentShader: `varying vec2 vUv; varying vec3 vN; varying vec3 vP; uniform sampler2D uTex; uniform float uDither, uHoles, uSeed, uH; ${LIGHT}
+          float hash(vec2 p){ return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453); }
+          float vnoise(vec3 p){ vec3 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
+            float n = i.x + i.y * 57.0 + i.z * 113.0 + uSeed * 7.0;
+            float a = fract(sin(n) * 43758.5), b = fract(sin(n + 1.0) * 43758.5), c = fract(sin(n + 57.0) * 43758.5), d = fract(sin(n + 58.0) * 43758.5);
+            float e = fract(sin(n + 113.0) * 43758.5), f2 = fract(sin(n + 114.0) * 43758.5), g = fract(sin(n + 170.0) * 43758.5), h = fract(sin(n + 171.0) * 43758.5);
+            return mix(mix(mix(a, b, f.x), mix(c, d, f.x), f.y), mix(mix(e, f2, f.x), mix(g, h, f.x), f.y), f.z); }
+          void main(){
+            // holes where the scanner missed (more towards the top and the back), frayed into points at their rims
+            float hn = vnoise(vP * 38.0) * 0.7 + vnoise(vP * 110.0) * 0.3;
+            float lim = 1.0 - uHoles * (0.35 + 0.5 * smoothstep(0.3, 1.0, vP.y / uH) + 0.25 * step(vP.z, 0.0));
+            if (hn > lim) discard;
+            if (hn > lim - 0.08 && hash(floor(gl_FragCoord.xy / 1.5)) > 0.35) discard;
+            float inBeam = 1.0 - smoothstep(uBeamRadius * 0.3, uBeamRadius * 1.05, distance(gl_FragCoord.xy, uLightPos));
+            if (uDither > 0.5 && hash(floor(gl_FragCoord.xy / 2.0)) > mix(0.3, 1.0, inBeam)) discard;
+            vec3 col = texture2D(uTex, vUv).rgb;
+            // the foot takes on the floor's grey
+            col = mix(col, vec3(0.32, 0.30, 0.27), 1.0 - smoothstep(0.0, uH * 0.08, vP.y));
+            gl_FragColor = vec4(shade(col, normalize(vN)), 1.0);
+          }`,
+        uniforms: { uTex: { value: tex }, uDither: { value: opts.dither ?? 1 }, uHoles: { value: opts.holes ?? 0.45 }, uSeed: { value: opts.seed || 1 }, uH: { value: height }, uAmbient: { value: 1 },
+          uBeamRadius: shared.uBeamRadius, uLightPos: shared.uLightPos, uPower: shared.uPower, uBoost: shared.uBoost, uAmbK: shared.uAmbK, uUV: shared.uUV },
+      });
+      const m = new THREE.Mesh(geo, mat);
+      m.position.set(at[0], at[1], at[2]);
+      m.rotation.y = Math.atan2(camera.position.x - at[0], camera.position.z - at[2]) + (opts.turn || 0);
+      if (opts.lying) { // fallen over: on its side, resting on the floor
+        const r0 = Math.max(...rows.slice(N * 0.1, N * 0.6).map(([l, r]) => (r - l) / 2)) * cw / ch * height;
+        m.rotation.order = 'YXZ'; m.rotation.x = 0; m.rotation.z = Math.PI / 2 + (rnd() - 0.5) * 0.12; m.position.y += r0 * 0.85;
+      }
+      scene.add(m);
+      (this.objects = this.objects || []).push(m);
+      // a ghost: a second, misaligned pass of the scanner, mostly holes
+      if (opts.ghost ?? 1) {
+        const gm = new THREE.Mesh(geo, mat.clone());
+        gm.material.uniforms.uHoles.value = 0.9; gm.material.uniforms.uSeed.value = (opts.seed || 1) + 50;
+        gm.position.copy(m.position); gm.rotation.copy(m.rotation);
+        gm.position.x += (rnd() - 0.5) * 0.04; gm.position.z += (rnd() - 0.5) * 0.04; gm.position.y += rnd() * 0.02;
+        gm.rotation.y += (rnd() - 0.5) * 0.4; gm.scale.setScalar(1 + (rnd() - 0.5) * 0.06);
+        scene.add(gm); this.objects.push(gm);
+      }
+      // spray: loose points around the body (scanner noise), some drifting off, some sunk into the floor
+      const np = opts.spray ?? 5000, sp = new Float32Array(np * 3), sn = new Float32Array(np * 3), su = new Float32Array(np * 2);
+      for (let i = 0; i < np; i++) {
+        const vi = Math.floor(rnd() * (N + 1) * (S + 1)), px = pos[vi * 3], py = pos[vi * 3 + 1], pz = pos[vi * 3 + 2];
+        const out = 1 + Math.pow(rnd(), 3) * 1.8, rr = Math.hypot(px, pz) || 1e-4;
+        sp[i * 3] = px * out + (rnd() - 0.5) * 0.01; sp[i * 3 + 1] = py + (rnd() - 0.5) * 0.02 * out - (rnd() < 0.15 ? rnd() * py * 0.5 : 0); sp[i * 3 + 2] = pz * out + (rnd() - 0.5) * 0.01;
+        sn[i * 3] = px / rr; sn[i * 3 + 1] = 0.2; sn[i * 3 + 2] = pz / rr;
+        su[i * 2] = uvs[vi * 2]; su[i * 2 + 1] = uvs[vi * 2 + 1];
+      }
+      const pg = new THREE.BufferGeometry();
+      pg.setAttribute('position', new THREE.BufferAttribute(sp, 3)); pg.setAttribute('normal', new THREE.BufferAttribute(sn, 3)); pg.setAttribute('uv', new THREE.BufferAttribute(su, 2));
+      const pts = new THREE.Points(pg, pointsMaterial({ uniforms: { uMap: { value: tex }, uHasMap: { value: 1 }, uColor: { value: new THREE.Color(1, 1, 1) } } }, 0.0035));
+      pts.position.copy(m.position); pts.rotation.copy(m.rotation); pts.userData.edge = true;
+      scene.add(pts); this.objects.push(pts);
+      return [cw, ch];
+    },
+    clearObjects() { (this.objects || []).forEach((o) => scene.remove(o)); this.objects = []; },
+    cloud(total, ptMax, keepMesh = false, grow = 1) {
+      const meshes = [], old = [];
+      model.traverse((o) => { if (o.isMesh) meshes.push(o); });
+      scene.traverse((o) => { if (o.isPoints && !o.userData.edge) old.push(o); });
+      old.forEach((o) => { scene.remove(o); o.geometry.dispose(); });
+      meshes.forEach((m) => { m.visible = true; });
+      const n = buildPointCloud(meshes, total, grow);
+      meshes.forEach((m) => { m.visible = keepMesh; });
+      shared.uPtMax.value = ptMax;
+      return n;
+    },
     setup(w, h, scale, ambK = 1) {
       recording = true;
       renderer.setPixelRatio(1);
@@ -3737,7 +4044,7 @@ D1pp6049aaetAxh60UHrRQWFFFFACg4pyt6UynLQNEqHFShge2KiXpUkfWgosxx71zSSQ+1SW8uzjHFT
 
   // Debug hook for building the piece (position + view); harmless in the final file.
   window.__room = {
-    cam, size, lamp, battery, moveBy,
+    cam, size, lamp, battery, moveBy, tick, // tick: for testing with the pane hidden
     // distance + wall normal from a point in a direction
     ray(x, y, z, yaw, pitch = 0) {
       const dir = new THREE.Vector3(Math.sin(yaw) * Math.cos(pitch), Math.sin(pitch), -Math.cos(yaw) * Math.cos(pitch));
