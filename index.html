@@ -2572,6 +2572,8 @@ D1pp6049aaetAxh60UHrRQWFFFFACg4pyt6UynLQNEqHFShge2KiXpUkfWgosxx71zSSQ+1SW8uzjHFT
 
   window.RoomSound = {
     renderOffline,
+    // the lamp's mode button (cardboard: UV on / off)
+    switchClick() { if (ctx && ctx.state === 'running' && enabled) switchClick(); },
     state() { return ctx ? ctx.state : 'not started'; },
     _test: { steps: () => stepCount, glass: () => ctx && glass(ctx.currentTime + 0.05, dry), drips: () => ctx && drips(), knock: () => ctx && knock(ctx.currentTime + 0.05), rat: () => ctx && rat(), gust: () => ctx && gust(), wind: () => ctx && windOutside() },
     // Walking into something: 'wall' = a dull bump (shoulder / hand against
@@ -3020,7 +3022,7 @@ D1pp6049aaetAxh60UHrRQWFFFFACg4pyt6UynLQNEqHFShge2KiXpUkfWgosxx71zSSQ+1SW8uzjHFT
     beamEl.style.width = beamEl.style.height = Math.round(beamRadiusPx * 1.9 * k) + 'px';
   }
   function resize() {
-    dpr = Math.min(window.devicePixelRatio || 1, 2);
+    dpr = Math.min(window.devicePixelRatio || 1, /[?&]vr\b/.test(location.search) ? 3 : 2); // cardboard: full sharpness (the lenses magnify)
     const r = canvas.getBoundingClientRect();
     if (!r.width || !r.height) return;
     renderer.setPixelRatio(dpr);
@@ -3030,7 +3032,7 @@ D1pp6049aaetAxh60UHrRQWFFFFACg4pyt6UynLQNEqHFShge2KiXpUkfWgosxx71zSSQ+1SW8uzjHFT
     shared.uScale.value = (r.height * dpr) / (2 * Math.tan(THREE.MathUtils.degToRad(camera.fov) / 2));
     shared.uRes.value.set(r.width * dpr, r.height * dpr);
     beamRadiusPx = Math.min(r.width, r.height) * (r.width > 900 ? (MOBILE ? 0.34 : 0.40) : 0.44);
-    if (/[?&]vr\b/.test(location.search)) beamRadiusPx = Math.min(r.width / 2, r.height) * 0.42; // cardboard: one picture per eye
+    if (/[?&]vr\b/.test(location.search)) beamRadiusPx = Math.min(r.width / 2, r.height) * 0.3; // cardboard: one picture per eye, a tighter cone
     applyBeamSize();
     if (!pointer.active) { pointer.x = r.width * 0.58; pointer.y = r.height * 0.42; }
     else { pointer.x = clamp(pointer.x, 0, r.width); pointer.y = clamp(pointer.y, 0, r.height); }
@@ -3493,7 +3495,7 @@ D1pp6049aaetAxh60UHrRQWFFFFACg4pyt6UynLQNEqHFShge2KiXpUkfWgosxx71zSSQ+1SW8uzjHFT
   if (VR) {
     stage.classList.add('clean', 'cardboard');
     const tip = document.createElement('div'); tip.className = 'gate-sub mono'; tip.style.marginTop = '18px';
-    tip.textContent = 'Cardboard: phone sideways, tap Enter, put it in the viewer. You walk by yourself, just look around.';
+    tip.textContent = 'Cardboard: phone sideways, tap Enter, put it in the viewer. You walk by yourself, just look around. Look down at your feet for a moment: UV lamp on / off.';
     enterBtn.insertAdjacentElement('afterend', tip);
     addEventListener('deviceorientation', (e) => { if (e.alpha != null) vrOri = e; });
     enterBtn.addEventListener('click', () => {
@@ -3502,6 +3504,9 @@ D1pp6049aaetAxh60UHrRQWFFFFACg4pyt6UynLQNEqHFShge2KiXpUkfWgosxx71zSSQ+1SW8uzjHFT
       try { navigator.wakeLock && navigator.wakeLock.request('screen').catch(() => {}); } catch (err) {}
     });
     camera.fov = 80; camera.updateProjectionMatrix();
+    // as in the reel: the high beam (it flickers by itself as its battery weakens),
+    // the room outside the cone nearly black
+    enterBtn.addEventListener('click', () => { highBeam = true; shared.uAmbK.value = 0.35; });
   }
   const vrEuler = new THREE.Euler(), vrQ1 = new THREE.Quaternion(-Math.sqrt(0.5), 0, 0, Math.sqrt(0.5)), vrQ0 = new THREE.Quaternion(), ZEE = new THREE.Vector3(0, 0, 1);
   function vrHead() { // phone orientation -> camera orientation (as three's DeviceOrientationControls)
@@ -3514,6 +3519,21 @@ D1pp6049aaetAxh60UHrRQWFFFFACg4pyt6UynLQNEqHFShge2KiXpUkfWgosxx71zSSQ+1SW8uzjHFT
       vrRef = true; vrOff.setFromAxisAngle(new THREE.Vector3(0, 1, 0), -(CONFIG.start.yaw - head));
     }
     return vrQ.premultiply(vrOff);
+  }
+  // UV lamp, without buttons: look down at your feet for 1.5 s and the lamp switches
+  // (a click, a blink of dark); look up again before the next switch
+  let vrUV = 0, vrDown = 0, vrArmed = true, vrBlink = 1;
+  function vrSwitch(dt) {
+    if (cam.pitch < -1.05 && vrArmed) {
+      vrDown += dt;
+      if (vrDown > 1.5) {
+        vrUV = 1 - vrUV; vrArmed = false; vrDown = 0; vrBlink = 0;
+        if (window.RoomSound && RoomSound.switchClick) RoomSound.switchClick();
+      }
+    } else { vrDown = 0; if (cam.pitch > -0.8) vrArmed = true; }
+    vrBlink = Math.min(1, vrBlink + dt / 0.09);
+    shared.uUV.value = vrBlink < 0.5 ? (1 - vrUV) : vrUV;
+    if (vrBlink < 1) shared.uPower.value *= vrBlink < 0.8 ? 0 : 1; // a blink of dark while it switches
   }
   function vrStep(dt, now) { // walk the lane (with collision, bob and steps as usual)
     vrT += dt;
@@ -3639,6 +3659,7 @@ D1pp6049aaetAxh60UHrRQWFFFFACg4pyt6UynLQNEqHFShge2KiXpUkfWgosxx71zSSQ+1SW8uzjHFT
     camera.position.set(cam.x + Math.cos(cam.yaw) * sway - Math.sin(cam.yaw) * jolt * 0.05, cam.y + bobY - jolt * 0.012, cam.z + Math.sin(cam.yaw) * sway + Math.cos(cam.yaw) * jolt * 0.05);
     camera.rotation.y = -cam.yaw;
     camera.rotation.x = cam.pitch - jolt * 0.03;
+    if (VR && entered && !recording && !vrCal) vrSwitch(dt);
     if (VR && entered && !recording) vrRender(dt);
     else renderer.render(scene, topCam || camera);
     return { moved, power };
